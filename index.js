@@ -46,9 +46,8 @@ const G_CACHE_ENABLED = String(cache_enabled).toLowerCase() === 'true';
 // --- DNS Configuration ---
 const customDnsServers = [];
 for (let i = 1; i <= 4; i++) {
-  if (process.env[`DNS${i}`]) {
-    customDnsServers.push(process.env[`DNS${i}`]);
-  }
+  const dnsVar = process.env[`DNS${i}`];
+  if (dnsVar) customDnsServers.push(dnsVar);
 }
 let dnsResolver = null;
 if (customDnsServers.length > 0) {
@@ -185,7 +184,7 @@ app.use((req, res, next) => {
   }
 });
 
-// --- Security: SSRF Protection ---
+// --- Security: SSRF Protection & Custom DNS Interceptor ---
 
 const isIpPrivate = (ip) => {
   try {
@@ -200,32 +199,45 @@ const isIpPrivate = (ip) => {
   }
 };
 
+// *** THE FINAL FIX IS HERE ***
+// This interceptor now resolves DNS and forces Axios to use the resolved IP.
 httpClient.interceptors.request.use(async (config) => {
-  const { hostname } = new URL(config.url);
+  const url = new URL(config.url);
+  const { hostname } = url;
+
   try {
     let address;
     if (new Address6(hostname).isValid()) {
       address = hostname; // It's already an IP
     } else {
-      // Perform DNS lookup using the appropriate resolver
       if (dnsResolver) {
         const addresses = await dnsResolver.resolve(hostname);
         if (addresses.length === 0) throw new Error('No addresses found');
-        address = addresses[0]; // Use the first resolved address
+        address = addresses[0];
       } else {
         const lookupResult = await dns.lookup(hostname);
         address = lookupResult.address;
       }
     }
+
     if (isIpPrivate(address)) {
       throw new axios.Cancel(`Request to private IP blocked. ${hostname} resolves to ${address}`);
     }
+
+    // Force Axios to use our resolved IP address
+    url.hostname = address;
+    config.url = url.toString();
+    // Set the 'Host' header so the server and TLS know the original domain
+    config.headers['Host'] = hostname;
+    
+    return config;
   } catch (e) {
     if (e instanceof axios.Cancel) throw e;
+    // This error will now correctly be thrown by Axios itself if the lookup fails
     throw new Error(`DNS lookup failed for ${hostname}`);
   }
-  return config;
 });
+
 
 // --- Icon Fetching Logic ---
 
