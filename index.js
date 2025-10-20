@@ -38,10 +38,12 @@ const {
   icon_payload_limit = 2 * 1024 * 1024,
   custom_user_agent,
   limit_separator = ',',
+  use_doh = 'false', // New variable for DNS over HTTPS
 } = env;
 
 const DEFAULT_USER_AGENT = custom_user_agent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const G_CACHE_ENABLED = String(cache_enabled).toLowerCase() === 'true';
+const G_USE_DOH = String(use_doh).toLowerCase() === 'true';
 
 // --- DNS Configuration ---
 const customDnsServers = [];
@@ -50,10 +52,12 @@ for (let i = 1; i <= 4; i++) {
   if (dnsVar) customDnsServers.push(dnsVar);
 }
 let dnsResolver = null;
-if (customDnsServers.length > 0) {
+if (customDnsServers.length > 0 && !G_USE_DOH) { // Only setup if not using DoH
   dnsResolver = new dns.Resolver();
   dnsResolver.setServers(customDnsServers);
   console.log(`Using custom DNS servers: ${customDnsServers.join(', ')}`);
+} else if (G_USE_DOH) {
+    console.log('Using DNS over HTTPS (DoH).');
 } else {
   console.log('Using system default DNS resolver.');
 }
@@ -200,7 +204,7 @@ const isIpPrivate = (ip) => {
 };
 
 // *** THE FINAL FIX IS HERE ***
-// This interceptor now resolves DNS and forces Axios to use the resolved IP.
+// This interceptor now includes DNS-over-HTTPS (DoH) logic.
 httpClient.interceptors.request.use(async (config) => {
   const url = new URL(config.url);
   const { hostname } = url;
@@ -210,11 +214,21 @@ httpClient.interceptors.request.use(async (config) => {
     if (new Address6(hostname).isValid()) {
       address = hostname; // It's already an IP
     } else {
-      if (dnsResolver) {
+      if (G_USE_DOH) {
+        // DNS over HTTPS path
+        const dohResponse = await axios.get(`https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`, {
+          headers: { 'accept': 'application/dns-json' }
+        });
+        const answers = dohResponse.data.Answer;
+        if (!answers || answers.length === 0) throw new Error('No A records found via DoH');
+        address = answers[0].data;
+      } else if (dnsResolver) {
+        // Custom DNS path
         const addresses = await dnsResolver.resolve(hostname);
         if (addresses.length === 0) throw new Error('No addresses found');
         address = addresses[0];
       } else {
+        // System DNS path
         const lookupResult = await dns.lookup(hostname);
         address = lookupResult.address;
       }
@@ -227,13 +241,11 @@ httpClient.interceptors.request.use(async (config) => {
     // Force Axios to use our resolved IP address
     url.hostname = address;
     config.url = url.toString();
-    // Set the 'Host' header so the server and TLS know the original domain
     config.headers['Host'] = hostname;
     
     return config;
   } catch (e) {
     if (e instanceof axios.Cancel) throw e;
-    // This error will now correctly be thrown by Axios itself if the lookup fails
     throw new Error(`DNS lookup failed for ${hostname}`);
   }
 });
