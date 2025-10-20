@@ -1,30 +1,23 @@
 steps:
-# Build the container image
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build', '-t', 'gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA', '.']
-
-# Push the container image to Container Registry
 - name: 'gcr.io/cloud-builders/docker'
   args: ['push', 'gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA']
-
-# Deploy container image to Cloud Run
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   entrypoint: 'gcloud'
   args:
   - 'run'
   - 'deploy'
-  - 'favicon-fetcher' # The name of your service
+  - 'favicon-fetcher'
   - '--image=gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA'
   - '--platform=managed'
-  - '--region=us-central1' # Change to your preferred region
-  - '--allow-unauthenticated' # Allow public access
+  - '--region=us-central1'
+  - '--allow-unauthenticated'
   - '--port=8080'
-  # ---
-  # --- NOTE: You must add your ENV VARS here or in the GCP Console ---
-  # --- Use a semicolon (;) as the separator for multi-part limits.
-  # --- For production, provide REDIS_URL here: --set-env-vars=REDIS_URL=redis://...
-  # ---
-  - '--set-env-vars=NODE_ENV=production,LIMIT_SEPARATOR=semicolon,LIMITA=rps:1;rpm:60'
+  # GCP's gcloud command requires using semicolons as separators within env vars.
+  # The LIMIT_SEPARATOR tells the app to parse them correctly.
+  # Add other variables like AUTHN0=secret;LIMIT0=... as needed.
+  - '--set-env-vars=NODE_ENV=production,PORT=8080,CACHE_ENABLED=true,CACHE_TTL_SECONDS=86400,REQ_TIMEOUT_MS=5000,HTML_PAYLOAD_LIMIT=250000,ICON_PAYLOAD_LIMIT=2097152,IN_MEMORY_CACHE_MAX_SIZE=52428800,LIMIT_SEPARATOR=semicolon,LIMITA=rps:1;rpm:60,LIMITI=rpm:30,CUSTOM_USER_AGENT=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
 images:
 - 'gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA'
 
