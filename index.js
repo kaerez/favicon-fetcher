@@ -12,10 +12,9 @@ const { LRUCache } = require('lru-cache');
 
 // --- Environment & Constants ---
 
-// Read all env vars into a case-insensitive map
+// Read all env vars into a case-insensitive map for general config
 const env = {};
 Object.keys(process.env).forEach(k => {
-  // Use a consistent case for keys (e.g., lowercase) to find them later
   env[k.toLowerCase()] = process.env[k];
 });
 
@@ -29,6 +28,7 @@ const {
   html_payload_limit = 250 * 1024, // 250KB
   icon_payload_limit = 2 * 1024 * 1024, // 2MB
   custom_user_agent,
+  limit_separator = ',', // Default to comma, can be overridden for GCP
 } = env;
 
 const DEFAULT_USER_AGENT = custom_user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -98,8 +98,8 @@ Object.keys(process.env).forEach(key => {
 
 function parseMultiLimit(limitStr) {
   if (!limitStr) return [];
-  // Handle case-insensitive limit values
-  return String(limitStr).toLowerCase().split(',').map(part => {
+  // Handle case-insensitive limit values and custom separator
+  return String(limitStr).toLowerCase().split(limit_separator).map(part => {
     const [unit, countStr] = part.trim().split(':');
     const max = parseInt(countStr, 10);
     if (isNaN(max)) return null;
