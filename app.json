@@ -1,21 +1,60 @@
 {
   "name": "Favicon Fetcher (Redis)",
-  "description": "A high-performance service to fetch, cache, and serve favicons. (Production Ready)",
+  "description": "A high-performance service to fetch, cache, and serve favicons.",
   "repository": "https://github.com/kaerez/favicon-fetcher",
-  "keywords": ["node", "express", "favicon", "redis", "cache"],
+  "keywords": [
+    "node",
+    "express",
+    "favicon",
+    "redis",
+    "cache"
+  ],
   "image": "heroku/nodejs",
   "addons": [
     {
-      "plan": "heroku-redis:hobby-dev",
-      "as": "REDIS"
+      "plan": "heroku-redis:hobby-dev"
     }
   ],
   "env": {
     "NODE_ENV": {
       "value": "production"
     },
+    "REDIS_URL": {
+      "description": "Automatically provided by the heroku-redis addon."
+    },
+    "LIMIT_SEPARATOR": {
+      "description": "Heroku supports commas, so this can be left unset to use the default.",
+      "value": ",",
+      "required": false
+    },
     "CACHE_ENABLED": {
+      "description": "Enable or disable caching.",
       "value": "true"
+    },
+    "CACHE_TTL_SECONDS": {
+      "description": "Cache expiration time in seconds.",
+      "value": "86400"
+    },
+    "IN_MEMORY_CACHE_MAX_SIZE": {
+      "description": "Max cache size (in bytes) for in-memory mode.",
+      "value": "52428800"
+    },
+    "REQ_TIMEOUT_MS": {
+      "description": "Timeout for fetching external resources in milliseconds.",
+      "value": "5000"
+    },
+    "HTML_PAYLOAD_LIMIT": {
+      "description": "Max HTML size to download (in bytes).",
+      "value": "250000"
+    },
+    "ICON_PAYLOAD_LIMIT": {
+      "description": "Max icon file size to download (in bytes).",
+      "value": "2097152"
+    },
+    "CUSTOM_USER_AGENT": {
+      "description": "Override the default User-Agent.",
+      "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+      "required": false
     },
     "LIMITA": {
       "description": "Global anonymous limit (e.g., rps:1,rpm:60).",
@@ -24,6 +63,16 @@
     "LIMITI": {
       "description": "Per-IP anonymous limit (e.g., rpm:30).",
       "value": "rpm:30",
+      "required": false
+    },
+    "AUTHN0": {
+      "description": "Example API key for user 0.",
+      "value": "",
+      "required": false
+    },
+    "LIMIT0": {
+      "description": "Example rate limit for user 0.",
+      "value": "",
       "required": false
     }
   }
