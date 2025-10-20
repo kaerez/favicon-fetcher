@@ -215,22 +215,81 @@ app.use((req, res, next) => {
 
 const isIpPrivate = (ip) => {
   try {
+    // Try parsing as IPv6 (handles both IPv6 and IPv4-mapped addresses)
     const addr = new Address6(ip);
-    return addr.isLoopback() || addr.isLinkLocal() || addr.isPrivate() || addr.isInSubnet('::ffff:127.0.0.0/104');
-  } catch (e) {
-    if (ip.startsWith('::ffff:')) {
-      const ipv4 = ip.substring(7);
-      if (ipv4.startsWith('127.') || ipv4.startsWith('10.') || ipv4.startsWith('192.168.')) return true;
-      // Check 172.16.0.0/12 range (172.16-31.x.x)
-      const octets = ipv4.split('.');
-      if (octets[0] === '172') {
-        const secondOctet = parseInt(octets[1], 10);
-        if (secondOctet >= 16 && secondOctet <= 31) return true;
-      }
-      return false;
+    
+    // Check IPv6 ranges
+    if (addr.isLoopback()) return true;  // ::1/128
+    if (addr.isLinkLocal()) return true; // fe80::/10
+    
+    // Check if it's an IPv4-mapped IPv6 address (::ffff:x.x.x.x)
+    if (addr.v4) {
+      const ipv4 = addr.to4().address;
+      return isIpv4Private(ipv4);
     }
+    
+    // IPv6-specific private/reserved ranges
+    const ipv6PrivateRanges = [
+      '::/128',           // Unspecified
+      '::1/128',          // Loopback (redundant but explicit)
+      '::ffff:0:0/96',    // IPv4-mapped
+      '::ffff:0:0:0/96',  // IPv4-translated
+      '64:ff9b::/96',     // IPv4/IPv6 translation
+      '64:ff9b:1::/48',   // IPv4/IPv6 translation (local-use)
+      '100::/64',         // Discard prefix
+      '2001::/32',        // TEREDO
+      '2001:10::/28',     // Deprecated (ORCHID)
+      '2001:20::/28',     // ORCHIDv2
+      '2001:db8::/32',    // Documentation
+      '2002::/16',        // 6to4
+      'fc00::/7',         // Unique Local Addresses (ULA)
+      'fe80::/10',        // Link-Local (redundant but explicit)
+      'ff00::/8',         // Multicast
+    ];
+    
+    for (const range of ipv6PrivateRanges) {
+      if (addr.isInSubnet(new Address6(range))) return true;
+    }
+    
     return false;
+  } catch (e) {
+    // If IPv6 parsing fails, try as IPv4
+    return isIpv4Private(ip);
   }
+};
+
+const isIpv4Private = (ip) => {
+  // Remove IPv4-mapped prefix if present
+  let ipv4 = ip;
+  if (ip.startsWith('::ffff:')) {
+    ipv4 = ip.substring(7);
+  }
+  
+  const octets = ipv4.split('.').map(Number);
+  if (octets.length !== 4 || octets.some(o => isNaN(o) || o < 0 || o > 255)) {
+    return false; // Invalid IPv4
+  }
+  
+  const [a, b, c, d] = octets;
+  
+  // Check all private and reserved IPv4 ranges
+  return (
+    a === 0 ||                              // 0.0.0.0/8 - Current network
+    a === 10 ||                             // 10.0.0.0/8 - Private
+    a === 127 ||                            // 127.0.0.0/8 - Loopback
+    (a === 169 && b === 254) ||             // 169.254.0.0/16 - Link-local
+    (a === 172 && b >= 16 && b <= 31) ||    // 172.16.0.0/12 - Private
+    (a === 192 && b === 0 && c === 0) ||    // 192.0.0.0/24 - IETF Protocol Assignments
+    (a === 192 && b === 0 && c === 2) ||    // 192.0.2.0/24 - TEST-NET-1
+    (a === 192 && b === 168) ||             // 192.168.0.0/16 - Private
+    (a === 198 && b === 18) ||              // 198.18.0.0/15 - Benchmark testing
+    (a === 198 && b === 19) ||              // 198.18.0.0/15 - Benchmark testing
+    (a === 198 && b === 51 && c === 100) || // 198.51.100.0/24 - TEST-NET-2
+    (a === 203 && b === 0 && c === 113) ||  // 203.0.113.0/24 - TEST-NET-3
+    a >= 224 ||                             // 224.0.0.0/4 - Multicast, 240.0.0.0/4 - Reserved
+    (a === 100 && b >= 64 && b <= 127) ||   // 100.64.0.0/10 - CGNAT
+    (a === 192 && b === 88 && c === 99)     // 192.88.99.0/24 - 6to4 Relay Anycast
+  );
 };
 
 httpClient.interceptors.request.use(async (config) => {
