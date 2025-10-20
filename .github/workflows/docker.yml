@@ -26,11 +26,11 @@ jobs:
         uses: docker/setup-qemu-action@v3
         continue-on-error: true
 
-      - name: Set up QEMU (manual fallback from ECR Mirror)
+      - name: Set up QEMU (manual fallback from Quay.io Mirror)
         if: steps.qemu_default.outcome == 'failure'
         run: |
-          echo "Default QEMU setup failed, falling back to manual run with ECR mirror."
-          docker run --rm --privileged public.ecr.aws/multiarch/qemu-user-static:latest --reset -p yes
+          echo "Default QEMU setup failed, falling back to manual run with Quay.io mirror."
+          docker run --rm --privileged quay.io/multiarch/qemu-user-static --reset -p yes
 
       # --- Resilient Buildx Setup ---
       - name: Set up Docker Buildx (primary)
@@ -91,11 +91,11 @@ jobs:
         uses: docker/setup-qemu-action@v3
         continue-on-error: true
 
-      - name: Set up QEMU (manual fallback from ECR Mirror)
+      - name: Set up QEMU (manual fallback from Quay.io Mirror)
         if: steps.qemu_default.outcome == 'failure'
         run: |
-          echo "Default QEMU setup failed, falling back to manual run with ECR mirror."
-          docker run --rm --privileged public.ecr.aws/multiarch/qemu-user-static:latest --reset -p yes
+          echo "Default QEMU setup failed, falling back to manual run with Quay.io mirror."
+          docker run --rm --privileged quay.io/multiarch/qemu-user-static --reset -p yes
 
       # --- Resilient Buildx Setup ---
       - name: Set up Docker Buildx (primary)
