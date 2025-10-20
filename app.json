@@ -12,18 +12,13 @@
   "image": "heroku/nodejs",
   "addons": [
     {
-      "plan": "heroku-redis:hobby-dev",
-      "as": "REDIS"
+      "plan": "heroku-redis:mini"
     }
   ],
   "env": {
     "NODE_ENV": {
       "description": "Sets the application environment to production.",
       "value": "production"
-    },
-    "REDIS_URL": {
-      "description": "The connection URL for the Redis instance. This is automatically provisioned by the Heroku Redis add-on.",
-      "generator": "heroku-redis"
     },
     "LIMIT_SEPARATOR": {
       "description": "The character used to separate multiple rate limit rules. Defaults to comma.",
