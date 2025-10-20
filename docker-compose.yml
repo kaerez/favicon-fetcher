@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LicenseRef-KSEC-FaviconFetcher
+# Copyright (C) 2025 KSEC - Erez Kalman
 version: '3.8'
 services:
   app:
