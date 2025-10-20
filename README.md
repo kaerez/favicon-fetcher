@@ -68,7 +68,7 @@ Request: `GET /?domain=google.com&key=mysecretkey0`
 
 The Cloudflare Worker variant runs on Cloudflare's edge network for the lowest possible latency. The deploy button will automatically guide you through creating the required KV namespaces.
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/kaerez/favicon-fetcher&path=cloudflare)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/kaerez/favicon-fetcher)
 
 **Required Manual Step (After Deployment):**
 For security, you must add your API keys as secrets after the initial deployment.
