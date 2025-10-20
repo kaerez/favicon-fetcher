@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: LicenseRef-KSEC-FaviconFetcher
+# Copyright (C) 2025 KSEC - Erez Kalman
+
 # This is the configuration file for your Cloudflare Worker.
 # It is configured for deployment via the "Deploy with Wrangler" button or a GitHub Action.
 
