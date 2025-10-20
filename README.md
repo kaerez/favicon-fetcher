@@ -74,7 +74,7 @@ You have two options for Heroku. The Redis-backed version is **strongly** recomm
 **Option 1: Deploy with Redis (Production Ready)**
 This button provisions the app AND a free `heroku-redis` instance. It reads its configuration from `app.json`.
 
-[![Deploy to Heroku with Redis](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/kaerez/favicon-fetcher)
+[![Deploy to Heroku with Redis](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/kaerez/favicon-fetcher%filename=app.json)
 
 **Option 2: Deploy with In-Memory Cache (Testing Only)**
 This version uses a RAM-based cache and will **lose all data** on every restart. It reads its configuration from `app-no-redis.json`.
