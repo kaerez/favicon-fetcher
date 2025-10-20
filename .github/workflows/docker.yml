@@ -39,3 +39,15 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # The env block below is a commented-out example of how to pass
+          # variables if you were to RUN the container for testing in this workflow.
+          # These are RUNTIME variables and are not baked into the image.
+          # env:
+          #   PORT: 8080
+          #   REDIS_URL: "redis://some-test-redis:6379"
+          #   CACHE_ENABLED: true
+          #   LIMIT_SEPARATOR: ','
+          #   LIMITA: "rps:100"
+          #   AUTHN0: "some_secret_key"
+          #   LIMIT0: "rpm:1000"
+
