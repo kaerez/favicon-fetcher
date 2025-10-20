@@ -1,0 +1,31 @@
+steps:
+# Build the container image
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA', '.']
+
+# Push the container image to Container Registry
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA']
+
+# Deploy container image to Cloud Run
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: 'gcloud'
+  args:
+  - 'run'
+  - 'deploy'
+  - 'favicon-fetcher' # The name of your service
+  - '--image=gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA'
+  - '--platform=managed'
+  - '--region=us-central1' # Change to your preferred region
+  - '--allow-unauthenticated' # Allow public access
+  - '--port=8080'
+  # ---
+  # --- NOTE: You must add your ENV VARS here or in the GCP Console ---
+  # --- Use a semicolon (;) to separate multiple limits, as commas are not allowed here.
+  # --- Your app code will need to handle splitting by semicolon for this specific platform.
+  # --- For production, provide REDIS_URL here: --set-env-vars=REDIS_URL=redis://...
+  # ---
+  - '--set-env-vars=NODE_ENV=production,LIMITA=rps:1;rpm:60'
+images:
+- 'gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA'
+
