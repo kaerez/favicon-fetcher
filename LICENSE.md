@@ -173,6 +173,6 @@ of future enforcement of that or any other provision.
 
 **Version:** 1.0  
 **Effective Date:** January 2025  
-**License URL:** https://github.com/kaerez/favicon-fetcher/blob/main/LICENSE
+**License URL:** https://github.com/kaerez/favicon-fetcher/blob/main/LICENSE.md
 
 For questions about this license, contact: https://www.kalman.co.il
