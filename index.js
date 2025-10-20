@@ -81,6 +81,8 @@ app.set('trust proxy', 1);
 const httpClient = axios.create({
   timeout: parseInt(req_timeout_ms, 10),
   headers: { 'User-Agent': DEFAULT_USER_AGENT },
+  // Important: Keep maxRedirects to follow sites like google.com
+  maxRedirects: 5,
 });
 
 // --- Auth & Rate Limiting ---
@@ -209,9 +211,16 @@ function normalizeDomain(domain) {
   return url;
 }
 
+// *** THE FIX IS HERE (Bug #2) ***
+// fetchHtml now returns the final URL after redirects.
 async function fetchHtml(url) {
-  const { data } = await httpClient.get(url, { maxContentLength: parseInt(html_payload_limit, 10), responseType: 'text' });
-  return data;
+  const response = await httpClient.get(url, { 
+    maxContentLength: parseInt(html_payload_limit, 10), 
+    responseType: 'text' 
+  });
+  // The final URL after all redirects
+  const finalUrl = response.request.res.responseUrl || url;
+  return { data: response.data, finalUrl };
 }
 
 function findIconsInHtml(html, baseUrl) {
@@ -244,15 +253,21 @@ async function getFaviconUrls(domain, desiredSize, magic) {
   for (const d of domainsToTry) {
     for (const protocol of ['https', 'http']) {
       try {
-        const baseUrl = `${protocol}://${d}`;
-        const html = await fetchHtml(baseUrl);
-        const iconsFromHtml = findIconsInHtml(html, baseUrl);
+        const { data, finalUrl } = await fetchHtml(`${protocol}://${d}`);
+        const iconsFromHtml = findIconsInHtml(data, finalUrl); // Use the final URL as the base
         allIcons = allIcons.concat(iconsFromHtml);
+        // If we found icons from HTML, we can often trust this is the canonical source
+        if(iconsFromHtml.length > 0) {
+           // Add favicon.ico for the final redirected domain as well
+           const finalDomain = new URL(finalUrl);
+           allIcons.push({ href: `${finalDomain.protocol}//${finalDomain.hostname}/favicon.ico`, size: 0 });
+        }
         break; 
       } catch (e) { /* Continue */ }
     }
   }
 
+  // Always add all possible /favicon.ico fallbacks as a last resort
   for (const d of domainsToTry) {
     allIcons.push({ href: `https://${d}/favicon.ico`, size: 0 });
     allIcons.push({ href: `http://${d}/favicon.ico`, size: 0 });
