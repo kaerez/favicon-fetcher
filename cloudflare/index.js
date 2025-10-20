@@ -8,6 +8,8 @@
 // It blocks direct IP addresses but CANNOT prevent domains that resolve to private IPs.
 // For production use requiring strong SSRF protection, use the Docker variant instead.
 
+// NOTE: HTMLRewriter is built-in to Cloudflare Workers - no import needed
+
 // --- SSRF Protection Functions ---
 
 function isIpv4Private(ip) {
@@ -143,6 +145,12 @@ function getClientIp(request) {
 // --- Rate Limiting Logic (using Workers KV) ---
 
 async function checkRateLimits(request, env) {
+  // Skip rate limiting if KV namespace not configured
+  if (!env.FAVICON_FETCHER_RATE_LIMITS) {
+    console.warn('Rate limiting disabled: FAVICON_FETCHER_RATE_LIMITS KV namespace not configured');
+    return null;
+  }
+
   const keyParam = getParam(request, 'key');
   let keyId = 'a'; // Anonymous
   let isAnonymous = true;
@@ -326,7 +334,8 @@ export default {
             const cleanDomain = normalizeDomain(domain);
             const cacheKey = `favicon:${cleanDomain}:${desiredSize}:${magic}`;
 
-            if (String(env.CACHE_ENABLED).toLowerCase() === 'true') {
+            // Only use cache if KV namespace is configured AND caching is enabled
+            if (String(env.CACHE_ENABLED).toLowerCase() === 'true' && env.FAVICON_FETCHER_CACHE) {
                 const cached = await env.FAVICON_FETCHER_CACHE.get(cacheKey, { type: 'json' });
                 if (cached) {
                     const imageBuffer = new Uint8Array(Object.values(cached.buffer)).buffer;
@@ -336,6 +345,8 @@ export default {
                     }
                     return new Response(imageBuffer, { headers: { 'Content-Type': cached.contentType } });
                 }
+            } else if (String(env.CACHE_ENABLED).toLowerCase() === 'true' && !env.FAVICON_FETCHER_CACHE) {
+                console.warn('Caching disabled: FAVICON_FETCHER_CACHE KV namespace not configured');
             }
 
             const iconUrls = await getFaviconUrls(cleanDomain, desiredSize, magic, env);
@@ -344,7 +355,8 @@ export default {
                 try {
                     const { buffer, contentType, href } = await fetchAndProcessIcon(iconUrl, env);
 
-                    if (String(env.CACHE_ENABLED).toLowerCase() === 'true') {
+                    // Only cache if KV namespace is configured AND caching is enabled
+                    if (String(env.CACHE_ENABLED).toLowerCase() === 'true' && env.FAVICON_FETCHER_CACHE) {
                         const cacheTtl = parseInt(env.CACHE_TTL_SECONDS || '86400', 10);
                         ctx.waitUntil(env.FAVICON_FETCHER_CACHE.put(cacheKey, { buffer: Array.from(new Uint8Array(buffer)), contentType, href }, { expirationTtl: cacheTtl }));
                     }
