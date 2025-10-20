@@ -3,8 +3,9 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { URL } = require('url');
 const https = require('https');
+const http2 = require('http2');
 const { Address6 } = require('ip-address');
-const { promises: dns, Resolver } = require('dns');
+const { promises: dns } = require('dns');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { RedisStore } = require('rate-limit-redis');
@@ -40,63 +41,41 @@ const {
   custom_user_agent,
   limit_separator = ',',
   debug = 'false',
-  doh1, doh2,
 } = env;
 
 const DEFAULT_USER_AGENT = custom_user_agent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const G_CACHE_ENABLED = String(cache_enabled).toLowerCase() === 'true';
 const G_DEBUG = String(debug).toLowerCase() === 'true';
-const G_DOH_ENDPOINTS = [doh1, doh2].filter(Boolean);
-const G_DOH_ENABLED = G_DOH_ENDPOINTS.length > 0;
-
-// --- DOH PROVIDER CONFIG (HARDCODED IPS TO BYPASS SYSTEM DNS) ---
-const DOH_PROVIDERS = {
-    'https://cloudflare-dns.com/dns-query': '1.1.1.1',
-    'https://dns.google/resolve': '8.8.8.8'
-};
 
 const logDebug = (...args) => {
   if (G_DEBUG) console.log(...args);
 };
 
-// --- DNS Configuration ---
-const customDnsServers = [];
-for (let i = 1; i <= 4; i++) {
-  const dnsVar = process.env[`DNS${i}`];
-  if (dnsVar) customDnsServers.push(dnsVar);
-}
-let dnsResolver = null;
-if (customDnsServers.length > 0) {
-  dnsResolver = new Resolver();
-  dnsResolver.setServers(customDnsServers);
-  console.log(`Custom DNS resolver configured with: ${customDnsServers.join(', ')}`);
-}
+// --- DNS Configuration (Dynamic from Env Vars with System Fallback) ---
+const DOH_URLS = [process.env.DOH1, process.env.DOH2].filter(Boolean);
 
-if (G_DOH_ENABLED) {
-  console.log(`DNS over HTTPS (DoH) is enabled. Using endpoints: ${G_DOH_ENDPOINTS.join(', ')}`);
-} else if (dnsResolver) {
-    console.log(`DoH is disabled. Using custom DNS servers directly.`);
+if (DOH_URLS.length > 0) {
+    console.log(`DNS over HTTPS (DoH) is enabled with ${DOH_URLS.length} provider(s).`);
 } else {
-  console.log('Using system default DNS resolver.');
+    console.log('DoH not configured. Using system default DNS resolver.');
 }
 
-// --- Storage Setup (Hybrid: Redis or In-Memory) ---
-let redisClient;
+// --- Storage Setup ---
 let cacheStore;
-
 if (REDIS_URL) {
   console.log('Found Redis URL. Connecting to Redis for caching and rate limiting.');
   const redisOptions = { maxRetriesPerRequest: null, enableReadyCheck: false };
   if (REDIS_URL.includes('rediss://')) {
     redisOptions.tls = { rejectUnauthorized: false };
   }
-  redisClient = new IORedis(REDIS_URL, redisOptions);
+  const redisClient = new IORedis(REDIS_URL, redisOptions);
   cacheStore = {
     get: (key) => redisClient.get(key),
     set: (key, value) => redisClient.set(key, value, 'EX', parseInt(cache_ttl_seconds, 10)),
+    redisClient // for rate limiter
   };
 } else {
-  console.warn('WARNING: No Redis URL found. Falling back to in-memory cache and rate limiting.');
+  console.warn('WARNING: No Redis URL found. Falling back to in-memory cache.');
   const lruCache = new LRUCache({
     maxSize: parseInt(in_memory_cache_max_size, 10),
     ttl: parseInt(cache_ttl_seconds, 10) * 1000,
@@ -109,7 +88,6 @@ if (REDIS_URL) {
 }
 
 // --- Security & HTTP Clients ---
-
 const app = express();
 app.use(helmet());
 app.disable('x-powered-by');
@@ -121,17 +99,9 @@ const httpClient = axios.create({
   maxRedirects: 5,
 });
 
-const dohClient = axios.create({
-  timeout: parseInt(req_timeout_ms, 10),
-  headers: { 'User-Agent': DEFAULT_USER_AGENT },
-});
-
-
 // --- Auth & Rate Limiting ---
-
 const authKeys = new Map();
 const limitConfig = {};
-
 Object.keys(process.env).forEach(key => {
   const upperKey = key.toUpperCase();
   if (upperKey.startsWith('AUTHN')) {
@@ -142,195 +112,169 @@ Object.keys(process.env).forEach(key => {
 });
 
 function parseMultiLimit(limitStr) {
-  if (!limitStr) return [];
-  const trimmedLimitStr = String(limitStr).trim();
-  if (trimmedLimitStr === '0') return [{ max: 0, windowMs: 1000 }];
-
-  return trimmedLimitStr.toLowerCase().split(String(limit_separator)).map(part => {
-    const trimmedPart = part.trim();
-    let unit, countStr;
-    if (trimmedPart.includes(':')) {
-      [unit, countStr] = trimmedPart.split(':');
-    } else {
-      unit = 'rps';
-      countStr = trimmedPart;
-    }
-    const max = parseInt(countStr, 10);
-    if (isNaN(max)) return null;
-    let windowMs;
-    switch (unit) {
-      case 'rps': windowMs = 1000; break;
-      case 'rpm': windowMs = 60 * 1000; break;
-      case 'rph': windowMs = 60 * 60 * 1000; break;
-      case 'rpd': windowMs = 24 * 60 * 60 * 1000; break;
-      default: return null;
-    }
-    return { max, windowMs };
-  }).filter(Boolean);
+    if (!limitStr) return [];
+    const trimmedLimitStr = String(limitStr).trim();
+    if (trimmedLimitStr === '0') return [{ max: 0, windowMs: 1000 }];
+    return trimmedLimitStr.toLowerCase().split(String(limit_separator)).map(part => {
+        const [unit, countStr] = part.trim().includes(':') ? part.trim().split(':') : ['rps', part.trim()];
+        const max = parseInt(countStr, 10);
+        if (isNaN(max)) return null;
+        const windowMultipliers = { rps: 1, rpm: 60, rph: 3600, rpd: 86400 };
+        const windowMs = (windowMultipliers[unit] || 0) * 1000;
+        return windowMs > 0 ? { max, windowMs } : null;
+    }).filter(Boolean);
 }
 
-const getClientIp = (req) => req.ip || req.socket.remoteAddress;
-
 const createRateLimiter = (limits, keyGenerator) => {
-  if (!limits || limits.length === 0) return (req, res, next) => next();
-  const limiters = limits.map(limit => {
-    const store = REDIS_URL ? new RedisStore({ sendCommand: (...args) => redisClient.call(...args) }) : undefined;
-    return rateLimit({
-      windowMs: limit.windowMs, max: limit.max, keyGenerator, store,
-      handler: (req, res) => { if (!res.headersSent) res.status(429).json({ error: 'Too many requests' }); },
+    if (!limits || limits.length === 0) return (req, res, next) => next();
+    const limiters = limits.map(limit => {
+        const store = cacheStore.redisClient ? new RedisStore({ sendCommand: (...args) => cacheStore.redisClient.call(...args) }) : undefined;
+        return rateLimit({
+            windowMs: limit.windowMs, max: limit.max, keyGenerator, store,
+            handler: (req, res) => { if (!res.headersSent) res.status(429).json({ error: 'Too many requests' }); },
+        });
     });
-  });
-  return (req, res, next) => {
-    const runLimiters = (index) => {
-      if (index >= limiters.length) return next();
-      limiters[index](req, res, (err) => {
-        if (err || res.headersSent) return;
-        runLimiters(index + 1);
-      });
+    return (req, res, next) => {
+        const runLimiters = (index) => {
+            if (index >= limiters.length) return next();
+            limiters[index](req, res, (err) => {
+                if (err || res.headersSent) return;
+                runLimiters(index + 1);
+            });
+        };
+        runLimiters(0);
     };
-    runLimiters(0);
-  };
 };
 
 app.use((req, res, next) => {
-  let token = null;
-  const authHeader = req.headers.authorization;
-  const queryKey = Object.keys(req.query).find(k => k.toLowerCase() === 'key');
-  if (authHeader) token = authHeader.split(' ')[1];
-  else if (queryKey) token = req.query[queryKey];
+    const authHeader = req.headers.authorization;
+    const queryKey = Object.keys(req.query).find(k => k.toLowerCase() === 'key');
+    const token = authHeader ? authHeader.split(' ')[1] : (queryKey ? req.query[queryKey] : null);
+    const keyId = (token && authKeys.get(token)) || 'a';
 
-  let keyId = 'a'; // Anonymous
-  if (token && authKeys.has(token)) keyId = authKeys.get(token);
-
-  if (keyId === 'a') {
-    const globalLimiter = createRateLimiter(parseMultiLimit(limitConfig.a), () => 'global_anonymous');
-    const ipLimiter = createRateLimiter(parseMultiLimit(limitConfig.i), getClientIp);
-    globalLimiter(req, res, (err) => { if (err || res.headersSent) return; ipLimiter(req, res, next); });
-  } else {
-    createRateLimiter(parseMultiLimit(limitConfig[keyId]), () => `user_${keyId}`)(req, res, next);
-  }
+    if (keyId === 'a') {
+        const globalLimiter = createRateLimiter(parseMultiLimit(limitConfig.a), () => 'global_anonymous');
+        const ipLimiter = createRateLimiter(parseMultiLimit(limitConfig.i), (req) => req.ip || req.socket.remoteAddress);
+        globalLimiter(req, res, (err) => { if (err || res.headersSent) return; ipLimiter(req, res, next); });
+    } else {
+        createRateLimiter(parseMultiLimit(limitConfig[keyId]), () => `user_${keyId}`)(req, res, next);
+    }
 });
 
 // --- Security: SSRF Protection & Custom DNS Interceptor ---
-
 const isIpPrivate = (ip) => {
   try {
     const addr = new Address6(ip);
     return addr.isLoopback() || addr.isLinkLocal() || addr.isPrivate() || addr.isInSubnet('::ffff:127.0.0.0/104');
-  } catch (e) {
-    if (ip.startsWith('::ffff:')) {
-      const ipv4 = ip.substring(7);
-      if (ipv4.startsWith('127.') || ipv4.startsWith('10.') || ipv4.startsWith('172.16.') || ipv4.startsWith('192.168.')) return true;
-    }
-    return false;
-  }
+  } catch (e) { return false; }
 };
 
-async function resolveViaDoh(hostname) {
-    for (const endpoint of G_DOH_ENDPOINTS) {
-        const dohUrl = new URL(endpoint);
-        const dohHostname = dohUrl.hostname;
-        const dohIp = DOH_PROVIDERS[endpoint];
+function resolveViaHttp2(hostname, dohUrl, dohIp) {
+    return new Promise((resolve, reject) => {
+        const url = new URL(dohUrl);
+        const authority = `${url.protocol}//${dohIp}:${url.port || 443}`;
+        
+        const client = http2.connect(authority, {
+            servername: url.hostname
+        });
+        
+        client.on('error', (err) => reject(err));
+        client.setTimeout(req_timeout_ms, () => {
+            client.destroy();
+            reject(new Error('Request timed out'));
+        });
 
-        if (!dohIp) {
-            logDebug(`Skipping DoH endpoint ${endpoint} because its IP is not hardcoded.`);
-            continue;
+        const reqPath = `${url.pathname}?name=${hostname}&type=A`;
+        const req = client.request({
+            [http2.constants.HTTP2_HEADER_SCHEME]: 'https',
+            [http2.constants.HTTP2_HEADER_METHOD]: http2.constants.HTTP2_METHOD_GET,
+            [http2.constants.HTTP2_HEADER_PATH]: reqPath,
+            [http2.constants.HTTP2_HEADER_AUTHORITY]: url.hostname,
+            'accept': 'application/dns-json',
+            'user-agent': DEFAULT_USER_AGENT
+        });
+
+        req.setEncoding('utf8');
+        let data = '';
+        req.on('data', (chunk) => { data += chunk; });
+        req.on('end', () => {
+            client.close();
+            try {
+                const jsonResponse = JSON.parse(data);
+                const answers = (jsonResponse.Answer || []).filter(a => a.type === 1).map(a => a.data);
+                if (answers.length > 0) {
+                    resolve(answers[0]);
+                } else {
+                    reject(new Error(`No A records found for ${hostname} via ${dohUrl}`));
+                }
+            } catch (parseError) {
+                reject(new Error(`Failed to parse DoH JSON response: ${parseError.message}`));
+            }
+        });
+        req.end();
+    });
+}
+
+async function resolveHostname(hostname) {
+    if (new Address6(hostname).isValid()) return hostname;
+
+    if (DOH_URLS.length > 0) {
+        for (const dohUrl of DOH_URLS) {
+            try {
+                const url = new URL(dohUrl);
+                logDebug(`Resolving DoH server IP for ${url.hostname} via system DNS...`);
+                const { address: dohIp } = await dns.lookup(url.hostname);
+                logDebug(`DoH server ${url.hostname} resolved to ${dohIp}.`);
+                
+                logDebug(`Resolving ${hostname} via HTTP/2 DoH at ${dohUrl}`);
+                return await resolveViaHttp2(hostname, dohUrl, dohIp);
+            } catch (e) {
+                logDebug(`DoH lookup via ${dohUrl} failed: ${e.message}`);
+            }
         }
-
-        try {
-            logDebug(`Querying DoH server ${dohHostname} (at ${dohIp}) for ${hostname}`);
-            const dohRequestUrl = `${dohUrl.protocol}//${dohIp}${dohUrl.pathname}?name=${hostname}`;
-
-            const dohResponseA = await dohClient.get(`${dohRequestUrl}&type=A`, {
-                headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
-            });
-            
-            // --- DIAGNOSTIC LOGGING ---
-            console.log(`--- RAW DOH RESPONSE FOR ${hostname} (A) FROM ${endpoint} ---`);
-            console.log(JSON.stringify(dohResponseA.data, null, 2));
-            // --- END DIAGNOSTIC LOGGING ---
-            
-            const answersA = (dohResponseA.data.Answer || []).filter(a => a.type === 1).map(a => a.data);
-            if (answersA.length > 0) return answersA[0];
-
-            const dohResponseAAAA = await dohClient.get(`${dohRequestUrl}&type=AAAA`, {
-                headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
-            });
-
-            // --- DIAGNOSTIC LOGGING ---
-            console.log(`--- RAW DOH RESPONSE FOR ${hostname} (AAAA) FROM ${endpoint} ---`);
-            console.log(JSON.stringify(dohResponseAAAA.data, null, 2));
-            // --- END DIAGNOSTIC LOGGING ---
-
-            const answersAAAA = (dohResponseAAAA.data.Answer || []).filter(a => a.type === 28).map(a => a.data);
-            if (answersAAAA.length > 0) return answersAAAA[0];
-
-        } catch (dohError) {
-            logDebug(`DoH lookup via ${endpoint} failed: ${dohError.message}`);
-        }
+        logDebug('All configured DoH lookups failed. Falling back to system DNS.');
     }
-    throw new Error('All DoH lookups failed');
+    
+    logDebug(`Resolving ${hostname} via system DNS...`);
+    const { address } = await dns.lookup(hostname);
+    return address;
 }
 
 httpClient.interceptors.request.use(async (config) => {
   const url = new URL(config.url);
   const { hostname } = url;
-
   try {
-    let address;
-    if (new Address6(hostname).isValid()) {
-      address = hostname; // It's already an IP
-    } else {
-      if (G_DOH_ENABLED) {
-        address = await resolveViaDoh(hostname);
-      } else if (dnsResolver) {
-        logDebug(`Resolving ${hostname} via custom DNS...`);
-        const addresses = await dnsResolver.resolve(hostname);
-        if (addresses.length === 0) throw new Error('No addresses found via custom DNS');
-        address = addresses[0];
-      } else {
-        logDebug(`Resolving ${hostname} via system DNS...`);
-        const lookupResult = await dns.lookup(hostname);
-        address = lookupResult.address;
-      }
+    const resolvedIp = await resolveHostname(hostname);
+    logDebug(`${hostname} resolved to ${resolvedIp}`);
+    if (isIpPrivate(resolvedIp)) {
+      throw new axios.Cancel(`Request to private IP blocked: ${hostname} resolved to ${resolvedIp}`);
     }
-
-    logDebug(`${hostname} resolved to ${address}`);
-    if (isIpPrivate(address)) {
-      throw new axios.Cancel(`Request to private IP blocked. ${hostname} resolves to ${address}`);
-    }
-
-    // Replace hostname with resolved IP and set Host header
-    url.hostname = address;
+    url.hostname = resolvedIp;
     config.url = url.toString();
     config.headers['Host'] = hostname;
-    
     return config;
   } catch (e) {
-    if (e instanceof axios.Cancel) throw e; // Don't wrap cancelation errors
+    if (axios.isCancel(e)) throw e;
     throw new Error(`DNS lookup failed for ${hostname}: ${e.message}`);
   }
 });
 
 
 // --- Icon Fetching Logic ---
-
 function normalizeDomain(domain) {
   if (!domain) throw new Error('Domain parameter is required');
-  let url = String(domain).trim().toLowerCase();
-  if (url.startsWith('http://') || url.startsWith('https://')) url = url.split('//')[1];
+  let url = String(domain).trim().toLowerCase().replace(/^https?:\/\//, '');
   url = url.split('/')[0].split('?')[0];
   if (url.length === 0 || url.includes('..') || url.includes('@')) throw new Error('Invalid domain format');
   return url;
 }
 
 async function fetchHtml(url) {
-  const response = await httpClient.get(url, { 
-    maxContentLength: parseInt(html_payload_limit, 10), 
-    responseType: 'text' 
+  const response = await httpClient.get(url, {
+    maxContentLength: parseInt(html_payload_limit, 10),
+    responseType: 'text'
   });
-  const finalUrl = response.request.res.responseUrl || url;
-  return { data: response.data, finalUrl };
+  return { data: response.data, finalUrl: response.request.res.responseUrl || url };
 }
 
 function findIconsInHtml(html, baseUrl) {
@@ -339,14 +283,11 @@ function findIconsInHtml(html, baseUrl) {
   $('link[rel*="icon"], link[rel*="apple-touch-icon"]').each((i, el) => {
     const href = $(el).attr('href');
     if (!href) return;
-    let size = 0;
     const sizes = $(el).attr('sizes');
-    if (sizes && sizes !== 'any') {
-      const sizeMatch = sizes.match(/(\d+)x(\d+)/);
-      if (sizeMatch) size = parseInt(sizeMatch[1], 10);
-    }
+    const sizeMatch = sizes && sizes !== 'any' ? sizes.match(/(\d+)x(\d+)/) : null;
+    const size = sizeMatch ? parseInt(sizeMatch[1], 10) : 0;
     try {
-      icons.push({ href: new URL(href, baseUrl).href, size: size || 0 });
+      icons.push({ href: new URL(href, baseUrl).href, size });
     } catch (e) { /* Ignore invalid URLs */ }
   });
   return icons;
@@ -355,35 +296,28 @@ function findIconsInHtml(html, baseUrl) {
 async function getFaviconUrls(domain, desiredSize, magic) {
   const domainsToConsider = new Set([domain]);
   if (magic) {
-    if (domain.startsWith('www.')) domainsToConsider.add(domain.substring(4));
-    else domainsToConsider.add(`www.${domain}`);
+    domainsToConsider.add(domain.startsWith('www.') ? domain.substring(4) : `www.${domain}`);
   }
 
   let allIcons = [];
-
-  for (const d of [...domainsToConsider.values()]) {
+  for (const d of [...domainsToConsider]) {
     for (const protocol of ['https', 'http']) {
       try {
         const { data, finalUrl } = await fetchHtml(`${protocol}://${d}`);
-        const iconsFromHtml = findIconsInHtml(data, finalUrl);
-        allIcons = allIcons.concat(iconsFromHtml);
-        
-        const finalDomain = new URL(finalUrl);
-        domainsToConsider.add(finalDomain.hostname);
-        
-        break; 
+        allIcons.push(...findIconsInHtml(data, finalUrl));
+        domainsToConsider.add(new URL(finalUrl).hostname);
+        break;
       } catch (e) {
         logDebug(`Could not fetch HTML from ${protocol}://${d}: ${e.message}`);
       }
     }
   }
 
-  for (const d of domainsToConsider.values()) {
+  for (const d of domainsToConsider) {
     allIcons.push({ href: `https://${d}/favicon.ico`, size: 0 });
-    allIcons.push({ href: `http://${d}/favicon.ico`, size: 0 });
   }
-  
-  const sortedIcons = allIcons.sort((a, b) => {
+
+  allIcons.sort((a, b) => {
     const aDiff = Math.abs(a.size - desiredSize);
     const bDiff = Math.abs(b.size - desiredSize);
     if (a.size >= desiredSize && b.size < desiredSize) return -1;
@@ -391,44 +325,33 @@ async function getFaviconUrls(domain, desiredSize, magic) {
     return aDiff - bDiff;
   });
 
-  const uniqueUrls = [...new Set(sortedIcons.map(icon => icon.href))];
-  if (uniqueUrls.length === 0) throw new Error('No potential icon URLs found for this domain');
+  const uniqueUrls = [...new Set(allIcons.map(icon => icon.href))];
+  if (uniqueUrls.length === 0) throw new Error('No potential icon URLs found');
   return uniqueUrls;
 }
 
 async function fetchAndProcessIcon(iconUrl) {
-  try {
-    const response = await httpClient.get(iconUrl, {
-      responseType: 'arraybuffer',
-      maxContentLength: parseInt(icon_payload_limit, 10),
-      validateStatus: (status) => status >= 200 && status < 300,
-    });
-    const contentType = response.headers['content-type'] || 'application/octet-stream';
-    if (!contentType.startsWith('image/')) throw new Error(`Fetched file is not an image: ${contentType}`);
-    return { buffer: response.data, contentType, href: iconUrl };
-  } catch (error) {
-    if (axios.isCancel(error)) throw error;
-    throw new Error(`Failed to fetch icon: ${iconUrl}`);
-  }
+  const response = await httpClient.get(iconUrl, {
+    responseType: 'arraybuffer',
+    maxContentLength: parseInt(icon_payload_limit, 10),
+    validateStatus: (status) => status >= 200 && status < 300,
+  });
+  const contentType = response.headers['content-type'] || 'application/octet-stream';
+  if (!contentType.startsWith('image/')) throw new Error(`Not an image: ${contentType}`);
+  return { buffer: response.data, contentType, href: iconUrl };
 }
 
 // --- Main Request Handler ---
-
 app.get('/', async (req, res, next) => {
   try {
-    const params = {};
-    for (const key in req.headers) { params[key.toLowerCase()] = req.headers[key]; }
-    for (const key in req.query) { params[key.toLowerCase()] = req.query[key]; }
-
-    const { domain, size = '64', m, magic, b64 } = params;
-    
+    const { domain, size = '64', m, magic, b64 } = { ...req.headers, ...req.query };
     const desiredSize = parseInt(size, 10);
     if (isNaN(desiredSize)) throw new Error('Invalid size parameter');
 
     const useMagic = (m !== undefined || magic !== undefined);
     const useBase64 = (b64 !== undefined);
     const cleanDomain = normalizeDomain(domain);
-    
+
     const cacheKey = `favicon:${cleanDomain}:${desiredSize}:${useMagic}`;
     if (G_CACHE_ENABLED) {
       const cachedData = await cacheStore.get(cacheKey);
@@ -439,9 +362,8 @@ app.get('/', async (req, res, next) => {
         return res.setHeader('Content-Type', contentType).send(imageBuffer);
       }
     }
-    
+
     const iconUrls = await getFaviconUrls(cleanDomain, desiredSize, useMagic);
-    
     for (const iconUrl of iconUrls) {
       try {
         const { buffer: imageBuffer, contentType, href } = await fetchAndProcessIcon(iconUrl);
@@ -462,14 +384,13 @@ app.get('/', async (req, res, next) => {
 });
 
 // --- Health Check & Error Handling ---
-
 app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
 app.use((err, req, res, next) => {
   console.error(`Final error for request: ${err.message}`);
   let statusCode = 500;
   if (err.message.includes('Invalid') || err.message.includes('required')) statusCode = 400;
-  else if (err.message.includes('No icons found') || err.message.includes('No valid icons')) statusCode = 404;
+  else if (err.message.includes('No valid icons') || err.message.includes('No potential icon')) statusCode = 404;
   else if (err.message.includes('timeout') || err.code === 'ECONNABORTED' || err.message.includes('DNS')) statusCode = 504;
   else if (err.message.includes('blocked')) statusCode = 403;
   res.status(statusCode).json({ error: err.message || 'An unexpected error occurred' });
