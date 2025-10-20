@@ -2,25 +2,33 @@
 # Copyright (C) 2025 KSEC - Erez Kalman
 
 # This is the configuration file for your Cloudflare Worker.
-# It is configured for deployment via the "Deploy with Wrangler" button or a GitHub Action.
+# Initial deployment works WITHOUT KV namespaces (rate limiting and caching disabled).
+# After deployment, follow the setup steps below to enable full functionality.
 
 name = "favicon-fetcher"
 main = "cloudflare/index.js"
 compatibility_date = "2023-10-30"
 
 # --- Storage (Key-Value Namespaces) ---
-# When you use the "Deploy with Wrangler" button or run `wrangler deploy`,
-# the deployment process will automatically prompt you to create these namespaces
-# because the 'id' fields are not specified.
-kv_namespaces = [
-  { binding = "FAVICON_FETCHER_CACHE" },
-  { binding = "FAVICON_FETCHER_RATE_LIMITS" }
-]
+# IMPORTANT: After initial deployment, run these commands to create KV namespaces:
+#
+# wrangler kv:namespace create FAVICON_FETCHER_CACHE
+# wrangler kv:namespace create FAVICON_FETCHER_RATE_LIMITS
+#
+# Then uncomment the sections below and paste the IDs from the command output:
+
+# [[kv_namespaces]]
+# binding = "FAVICON_FETCHER_CACHE"
+# id = "YOUR_CACHE_NAMESPACE_ID_HERE"
+
+# [[kv_namespaces]]
+# binding = "FAVICON_FETCHER_RATE_LIMITS"
+# id = "YOUR_RATE_LIMIT_NAMESPACE_ID_HERE"
 
 # --- Environment Variables ---
 # These are non-secret configuration values that will be set on your deployed Worker.
 [vars]
-CACHE_ENABLED = "true"
+CACHE_ENABLED = "false"  # Set to "true" after KV namespaces are configured
 CACHE_TTL_SECONDS = "86400" # 24 hours
 LIMIT_SEPARATOR = ","
 LIMITA = "rps:1,rpm:10"
@@ -28,8 +36,6 @@ LIMITI = "rpm:20"
 CUSTOM_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
 
 # --- Secrets ---
-# Secrets must be set securely in the Cloudflare dashboard under your Worker's settings
+# Secrets must be set securely in the Cloudflare dashboard after deployment
 # (Settings > Variables > Environment Variables > Encrypt).
-# They are NOT stored in this file. After deployment, add secrets for each API key
-# (e.g., AUTHN0) and its corresponding limit (e.g., LIMIT0).
-
+# Add secrets for each API key (e.g., AUTHN0) and its limit (e.g., LIMIT0).
