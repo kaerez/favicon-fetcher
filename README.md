@@ -92,11 +92,38 @@ For security, you must add your API keys as secrets after the initial deployment
 ## Local Development (Docker Variant)
 
 1.  **Clone the repository and `cd` into it.**
-2.  **Create a local environment file:** `cp .env.example .env`
-3.  **Customize your local config** in the `.env` file.
+2.  **Review the example configuration** in `docker-compose.yml` to understand available environment variables.
+3.  **(Optional) Customize your local config:**
+    - Edit `docker-compose.yml` directly, OR
+    - Create a `.env` file with your custom values (Docker Compose will use it automatically)
 4.  **Run with Docker Compose:** `docker-compose up --build`
 
 The service will be available at `http://localhost:8080`.
+
+### Example .env File (Optional)
+If you prefer using a `.env` file instead of editing `docker-compose.yml`:
+```bash
+PORT=8080
+REDIS_URL=redis://redis:6379
+CACHE_ENABLED=true
+CACHE_TTL_SECONDS=86400
+REQ_TIMEOUT_MS=5000
+HTML_PAYLOAD_LIMIT=250000
+ICON_PAYLOAD_LIMIT=2097152
+DEBUG=false
+
+# Optional: DNS over HTTPS
+# DOH1=https://dns.google/dns-query
+# DOH2=https://cloudflare-dns.com/dns-query
+
+# Optional: API Keys and Rate Limits
+# AUTHN0=your_secret_key_here
+# LIMIT0=rps:10,rpm:500
+
+# Anonymous Rate Limits
+LIMITA=rps:1,rpm:60
+LIMITI=rpm:30
+```
 
 ---
 
