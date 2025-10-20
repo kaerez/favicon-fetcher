@@ -72,7 +72,7 @@ Request: `GET /?domain=google.com&Key=mysecretkey0`
 You have two options for Heroku. The Redis-backed version is **strongly** recommended for any real use.
 
 **Option 1: Deploy with Redis (Production Ready)**
-This button provisions the app AND a free `heroku-redis` instance. It reads its configuration from `app.json`.
+This button provisions the app AND a `heroku-redis` instance. It reads its configuration from `app.json`.
 
 [![Deploy to Heroku with Redis](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/kaerez/favicon-fetcher%filename=app.json)
 
