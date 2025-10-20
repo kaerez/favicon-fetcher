@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # Connect the app to the redis service defined below
+      REDIS_URL: "redis://redis:6379"
+      PORT: 8080
+    # Load local .env file for auth keys and other secrets
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
+  redis:
+    image: "redis:7-alpine"
+    # No need to expose Redis port to host machine, app container can access it directly
+    volumes:
+      # Persist Redis data across restarts
+      - redis_data:/data
+
+volumes:
+  redis_data:
+
