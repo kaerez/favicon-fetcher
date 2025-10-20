@@ -9,7 +9,8 @@ on:
       - main
 
 jobs:
-  build_and_push:
+  # This job builds and pushes the multi-architecture manifest to ghcr.io
+  build-and-push-manifest:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,9 +20,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Set up Docker Buildx to enable advanced features like artifact creation
-      - name: Set up Docker Buildx
+      - name: Set up QEMU for multi-architecture builds
+        uses: docker/setup-qemu-action@v3
+
+      # Step 1: Attempt to set up Buildx from the default source (Docker Hub)
+      - name: Set up Docker Buildx (primary)
+        id: buildx_default
         uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      # Step 2: If the primary setup failed, use the ECR mirror as a fallback
+      - name: Set up Docker Buildx (from ECR Mirror as fallback)
+        if: steps.buildx_default.outcome == 'failure'
+        run: |
+          echo "Default Buildx setup failed, falling back to ECR mirror."
+          docker buildx create \
+            --name multi-arch-builder \
+            --driver docker-container \
+            --driver-opt image=public.ecr.aws/moby/buildkit:buildx-stable-1 \
+            --use
+          docker buildx inspect --bootstrap
 
       - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
@@ -36,22 +54,70 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
 
-      # Build the image, push it to GHCR, and save it as a local .tar file
-      - name: Build and push Docker image
+      - name: Build and push multi-arch image
         uses: docker/build-push-action@v5
         with:
           context: .
-          # Push only on pushes to the main branch, not on pull requests
+          # If the fallback ran, we need to specify the builder name
+          builder: ${{ steps.buildx_default.outcome == 'failure' && 'multi-arch-builder' || '' }}
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Save the image as a tarball to be uploaded as an artifact
-          outputs: type=docker,dest=/tmp/favicon-fetcher-image.tar
 
-      # Upload the .tar file as a build artifact for inspection and local use
+  # This job creates downloadable single-architecture image artifacts
+  build-and-save-artifacts:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-and-push-manifest
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # Use the same automated fallback logic for the artifact job
+      - name: Set up Docker Buildx (primary)
+        id: buildx_default
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Set up Docker Buildx (from ECR Mirror as fallback)
+        if: steps.buildx_default.outcome == 'failure'
+        run: |
+          echo "Default Buildx setup failed, falling back to ECR mirror."
+          docker buildx create \
+            --name multi-arch-builder \
+            --driver docker-container \
+            --driver-opt image=public.ecr.aws/moby/buildkit:buildx-stable-1 \
+            --use
+          docker buildx inspect --bootstrap
+      
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+
+      - name: Build and export to tar
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          builder: ${{ steps.buildx_default.outcome == 'failure' && 'multi-arch-builder' || '' }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=docker,dest=/tmp/favicon-fetcher-image-${{ matrix.platform }}.tar
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: false
+
       - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: favicon-fetcher-image
-          path: /tmp/favicon-fetcher-image.tar
+          name: favicon-fetcher-image-${{ matrix.platform }}
+          path: /tmp/favicon-fetcher-image-${{ matrix.platform }}.tar
 
