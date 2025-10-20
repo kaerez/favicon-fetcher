@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LicenseRef-KSEC-FaviconFetcher
+# Copyright (C) 2025 KSEC - Erez Kalman. All rights reserved.
 name: Build and Push Docker Image
 
 on:
