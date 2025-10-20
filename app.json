@@ -1,0 +1,31 @@
+{
+  "name": "Favicon Fetcher (Redis)",
+  "description": "A high-performance service to fetch, cache, and serve favicons. (Production Ready)",
+  "repository": "https://github.com/kaerez/favicon-fetcher",
+  "keywords": ["node", "express", "favicon", "redis", "cache"],
+  "image": "heroku/nodejs",
+  "addons": [
+    {
+      "plan": "heroku-redis:hobby-dev",
+      "as": "REDIS"
+    }
+  ],
+  "env": {
+    "NODE_ENV": {
+      "value": "production"
+    },
+    "CACHE_ENABLED": {
+      "value": "true"
+    },
+    "LIMITA": {
+      "description": "Global anonymous limit (e.g., rps:1,rpm:60).",
+      "value": "rps:1,rpm:60"
+    },
+    "LIMITI": {
+      "description": "Per-IP anonymous limit (e.g., rpm:30).",
+      "value": "rpm:30",
+      "required": false
+    }
+  }
+}
+
