@@ -23,7 +23,6 @@ It can be run as a "stateless" service (for local testing, using in-memory cache
 **Base URL:** `https://your-app-url.com/`
 
 All query parameters, their values (e.g., `true`, `TRUE`), and the domain are **case-insensitive**.
-The parameters can also be provided in the request header.
 
 - **`domain` (Required):** The domain to fetch. e.g., `google.com`.
 - **`s` / `size` (Optional):** The desired icon size (if available). Default: `64`. e.g., `s=16`.
@@ -42,7 +41,7 @@ Request: `GET /?domain=Github.com&S=128`
 
 ### Example 2: Get Base64 JSON
 
-Request: `GET /?domain=github.com&s=128&b64=TRUE`
+Request: `GET /?domain=google.com&s=128&b64=TRUE`
 
 - **Response:**
 - **Status:** `200 OK`
@@ -50,7 +49,7 @@ Request: `GET /?domain=github.com&s=128&b64=TRUE`
 - **Body:**
   ```json
   {
-    "href": "google.com",
+    "href": "https://www.google.com/favicon.ico",
     "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhE..."
   }
   ```
