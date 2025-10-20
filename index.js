@@ -49,6 +49,12 @@ const G_DEBUG = String(debug).toLowerCase() === 'true';
 const G_DOH_ENDPOINTS = [doh1, doh2].filter(Boolean);
 const G_DOH_ENABLED = G_DOH_ENDPOINTS.length > 0;
 
+// --- DOH PROVIDER CONFIG (HARDCODED IPS TO BYPASS SYSTEM DNS) ---
+const DOH_PROVIDERS = {
+    'https://cloudflare-dns.com/dns-query': '1.1.1.1',
+    'https://dns.google/resolve': '8.8.8.8'
+};
+
 const logDebug = (...args) => {
   if (G_DEBUG) console.log(...args);
 };
@@ -220,6 +226,40 @@ const isIpPrivate = (ip) => {
   }
 };
 
+async function resolveViaDoh(hostname) {
+    for (const endpoint of G_DOH_ENDPOINTS) {
+        const dohUrl = new URL(endpoint);
+        const dohHostname = dohUrl.hostname;
+        const dohIp = DOH_PROVIDERS[endpoint];
+
+        if (!dohIp) {
+            logDebug(`Skipping DoH endpoint ${endpoint} because its IP is not hardcoded.`);
+            continue;
+        }
+
+        try {
+            logDebug(`Querying DoH server ${dohHostname} (at ${dohIp}) for ${hostname}`);
+            const dohRequestUrl = `${dohUrl.protocol}//${dohIp}${dohUrl.pathname}?name=${hostname}`;
+
+            const dohResponseA = await dohClient.get(`${dohRequestUrl}&type=A`, {
+                headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
+            });
+            const answersA = (dohResponseA.data.Answer || []).filter(a => a.type === 1).map(a => a.data);
+            if (answersA.length > 0) return answersA[0];
+
+            const dohResponseAAAA = await dohClient.get(`${dohRequestUrl}&type=AAAA`, {
+                headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
+            });
+            const answersAAAA = (dohResponseAAAA.data.Answer || []).filter(a => a.type === 28).map(a => a.data);
+            if (answersAAAA.length > 0) return answersAAAA[0];
+
+        } catch (dohError) {
+            logDebug(`DoH lookup via ${endpoint} failed: ${dohError.message}`);
+        }
+    }
+    throw new Error('All DoH lookups failed');
+}
+
 httpClient.interceptors.request.use(async (config) => {
   const url = new URL(config.url);
   const { hostname } = url;
@@ -227,49 +267,14 @@ httpClient.interceptors.request.use(async (config) => {
   try {
     let address;
     if (new Address6(hostname).isValid()) {
-      address = hostname;
+      address = hostname; // It's already an IP
     } else {
       if (G_DOH_ENABLED) {
-        logDebug(`Resolving ${hostname} via DoH...`);
-        // --- THE FINAL FIX IS HERE ---
-        // 1. Resolve the DoH server's IP first, cleanly.
-        const dohUrl = new URL(G_DOH_ENDPOINTS[0]);
-        const dohHostname = dohUrl.hostname;
-        let dohIp;
-        if (dnsResolver) {
-          logDebug(`Using custom DNS for DoH bootstrap of ${dohHostname}`);
-          const addresses = await dnsResolver.resolve(dohHostname);
-          if (addresses.length === 0) throw new Error(`Could not resolve DoH server ${dohHostname} with custom DNS`);
-          dohIp = addresses[0];
-        } else {
-          logDebug(`Using system DNS for DoH bootstrap of ${dohHostname}`);
-          const lookupResult = await dns.lookup(dohHostname);
-          dohIp = lookupResult.address;
-        }
-        logDebug(`DoH server ${dohHostname} resolved to ${dohIp}`);
-
-        // 2. Make the DoH request using the resolved IP.
-        const dohRequestUrl = `${dohUrl.protocol}//${dohIp}${dohUrl.pathname}?name=${hostname}&type=A`;
-        const dohResponseA = await dohClient.get(dohRequestUrl, {
-          headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
-        });
-        
-        let answers = dohResponseA.data.Answer;
-        if (!answers || answers.length === 0) {
-          const dohRequestUrlAAAA = `${dohUrl.protocol}//${dohIp}${dohUrl.pathname}?name=${hostname}&type=AAAA`;
-          const dohResponseAAAA = await dohClient.get(dohRequestUrlAAAA, {
-             headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
-          });
-          answers = dohResponseAAAA.data.Answer;
-        }
-        
-        if (!answers || answers.length === 0) throw new Error('No A or AAAA records found via DoH');
-        address = answers[0].data;
-
+        address = await resolveViaDoh(hostname);
       } else if (dnsResolver) {
         logDebug(`Resolving ${hostname} via custom DNS...`);
         const addresses = await dnsResolver.resolve(hostname);
-        if (addresses.length === 0) throw new Error('No addresses found');
+        if (addresses.length === 0) throw new Error('No addresses found via custom DNS');
         address = addresses[0];
       } else {
         logDebug(`Resolving ${hostname} via system DNS...`);
@@ -283,13 +288,14 @@ httpClient.interceptors.request.use(async (config) => {
       throw new axios.Cancel(`Request to private IP blocked. ${hostname} resolves to ${address}`);
     }
 
+    // Replace hostname with resolved IP and set Host header
     url.hostname = address;
     config.url = url.toString();
     config.headers['Host'] = hostname;
     
     return config;
   } catch (e) {
-    if (e instanceof axios.Cancel) throw e;
+    if (e instanceof axios.Cancel) throw e; // Don't wrap cancelation errors
     throw new Error(`DNS lookup failed for ${hostname}: ${e.message}`);
   }
 });
@@ -458,4 +464,3 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(port, () => console.log(`Favicon Fetcher listening on port ${port}`));
-
