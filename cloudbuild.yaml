@@ -21,11 +21,10 @@ steps:
   - '--port=8080'
   # ---
   # --- NOTE: You must add your ENV VARS here or in the GCP Console ---
-  # --- Use a semicolon (;) to separate multiple limits, as commas are not allowed here.
-  # --- Your app code will need to handle splitting by semicolon for this specific platform.
+  # --- Use a semicolon (;) as the separator for multi-part limits.
   # --- For production, provide REDIS_URL here: --set-env-vars=REDIS_URL=redis://...
   # ---
-  - '--set-env-vars=NODE_ENV=production,LIMITA=rps:1;rpm:60'
+  - '--set-env-vars=NODE_ENV=production,LIMIT_SEPARATOR=semicolon,LIMITA=rps:1;rpm:60'
 images:
 - 'gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA'
 
