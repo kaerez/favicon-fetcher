@@ -53,6 +53,16 @@
       "value": "",
       "required": false
     },
+     "DNS1": {
+      "description": "DNS1.",
+      "value": "1.1.1.1",
+      "required": false
+    },
+     "DNS2": {
+      "description": "DNS2.",
+      "value": "8.8.8.8",
+      "required": false
+    },
     "AUTHN0": {
       "description": "Example API key. You can create more by adding AUTHN1, AUTHN2, etc. in the Heroku dashboard after deployment.",
       "value": "",
