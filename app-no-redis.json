@@ -53,16 +53,6 @@
       "value": "",
       "required": false
     },
-     "DNS1": {
-      "description": "DNS1.",
-      "value": "1.1.1.1",
-      "required": false
-    },
-     "DNS2": {
-      "description": "DNS2.",
-      "value": "8.8.8.8",
-      "required": false
-    },
     "DOH1": {
       "description": "DOH1.",
       "value": "https://dns.google/dns-query",
