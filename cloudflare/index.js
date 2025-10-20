@@ -336,14 +336,20 @@ export default {
 
             // Only use cache if KV namespace is configured AND caching is enabled
             if (String(env.CACHE_ENABLED).toLowerCase() === 'true' && env.FAVICON_FETCHER_CACHE) {
-                const cached = await env.FAVICON_FETCHER_CACHE.get(cacheKey, { type: 'json' });
+                const cached = await env.FAVICON_FETCHER_CACHE.get(cacheKey, { type: 'text' });
                 if (cached) {
-                    const imageBuffer = new Uint8Array(Object.values(cached.buffer)).buffer;
-                    if (b64) {
-                        const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(imageBuffer)));
-                        return new Response(JSON.stringify({ href: cached.href, base64: `data:${cached.contentType};base64,${base64}` }), { headers: { 'Content-Type': 'application/json' } });
+                    try {
+                        const parsed = JSON.parse(cached);
+                        const imageBuffer = new Uint8Array(parsed.buffer).buffer;
+                        if (b64) {
+                            const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(imageBuffer)));
+                            return new Response(JSON.stringify({ href: parsed.href, base64: `data:${parsed.contentType};base64,${base64}` }), { headers: { 'Content-Type': 'application/json' } });
+                        }
+                        return new Response(imageBuffer, { headers: { 'Content-Type': parsed.contentType } });
+                    } catch (e) {
+                        console.error(`Cache parse error: ${e.message}`);
+                        // Continue to fetch fresh data
                     }
-                    return new Response(imageBuffer, { headers: { 'Content-Type': cached.contentType } });
                 }
             } else if (String(env.CACHE_ENABLED).toLowerCase() === 'true' && !env.FAVICON_FETCHER_CACHE) {
                 console.warn('Caching disabled: FAVICON_FETCHER_CACHE KV namespace not configured');
@@ -358,7 +364,12 @@ export default {
                     // Only cache if KV namespace is configured AND caching is enabled
                     if (String(env.CACHE_ENABLED).toLowerCase() === 'true' && env.FAVICON_FETCHER_CACHE) {
                         const cacheTtl = parseInt(env.CACHE_TTL_SECONDS || '86400', 10);
-                        ctx.waitUntil(env.FAVICON_FETCHER_CACHE.put(cacheKey, { buffer: Array.from(new Uint8Array(buffer)), contentType, href }, { expirationTtl: cacheTtl }));
+                        const cacheData = JSON.stringify({ 
+                            buffer: Array.from(new Uint8Array(buffer)), 
+                            contentType, 
+                            href 
+                        });
+                        ctx.waitUntil(env.FAVICON_FETCHER_CACHE.put(cacheKey, cacheData, { expirationTtl: cacheTtl }));
                     }
 
                     if (b64) {
