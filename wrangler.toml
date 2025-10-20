@@ -5,7 +5,7 @@
 # It is configured for deployment via the "Deploy with Wrangler" button or a GitHub Action.
 
 name = "favicon-fetcher"
-main = "index.js"
+main = "cloudflare/index.js"
 compatibility_date = "2023-10-30"
 
 # --- Storage (Key-Value Namespaces) ---
