@@ -63,6 +63,16 @@
       "value": "8.8.8.8",
       "required": false
     },
+    "DOH1": {
+      "description": "DOH1.",
+      "value": "https://dns.google/dns-query",
+      "required": false
+    },
+    "DOH2": {
+      "description": "DOH2.",
+      "value": "https://cloudflare-dns.com/dns-query",
+      "required": false
+    },
     "AUTHN0": {
       "description": "Example API key. You can create more by adding AUTHN1, AUTHN2, etc. in the Heroku dashboard after deployment.",
       "value": "",
