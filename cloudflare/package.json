@@ -16,6 +16,6 @@
     "wrangler": "^3.0.0"
   },
   "dependencies": {
-    "html-rewriter-wasm": "^0.4.1"
+   
   }
 }
