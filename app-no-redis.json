@@ -1,0 +1,25 @@
+{
+  "name": "Favicon Fetcher (In-Memory)",
+  "description": "A service to fetch favicons. (Testing/Demo only, not for production)",
+  "repository": "https://github.com/kaerez/favicon-fetcher",
+  "keywords": ["node", "express", "favicon"],
+  "image": "heroku/nodejs",
+  "env": {
+    "NODE_ENV": {
+      "value": "production"
+    },
+    "CACHE_ENABLED": {
+      "value": "true"
+    },
+    "LIMITA": {
+      "description": "Global anonymous limit (e.g., rps:1,rpm:60).",
+      "value": "rps:1,rpm:60"
+    },
+    "LIMITI": {
+      "description": "Per-IP anonymous limit (e.g., rpm:30).",
+      "value": "rpm:30",
+      "required": false
+    }
+  }
+}
+
