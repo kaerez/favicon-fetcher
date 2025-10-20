@@ -239,7 +239,7 @@ httpClient.interceptors.request.use(async (config) => {
         if (dnsResolver) {
           logDebug(`Using custom DNS for DoH bootstrap of ${dohHostname}`);
           const addresses = await dnsResolver.resolve(dohHostname);
-          if (addresses.length === 0) throw new Error(`Could not resolve DoH server ${dohHostname}`);
+          if (addresses.length === 0) throw new Error(`Could not resolve DoH server ${dohHostname} with custom DNS`);
           dohIp = addresses[0];
         } else {
           logDebug(`Using system DNS for DoH bootstrap of ${dohHostname}`);
