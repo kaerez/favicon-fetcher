@@ -6,13 +6,14 @@ This repository contains two variants of a high-performance service that fetches
 
 ## Features
 
-- **Robust Icon Discovery:** Parses site HTML for `<link>` tags before falling back to `/favicon.ico`.
+- **Robust Icon Discovery:** Exhaustively parses site HTML (including `www` subdomains and redirects) for `<link>` tags before falling back to `/favicon.ico`.
 - **Best-Fit Sizing:** Intelligently finds the icon that best matches the requested size.
 - **Proxy Service:** Fetches and returns the image directly, bypassing client-side CORS issues.
 - **Base64 Format:** Optional flag (`b64`) to return a JSON object with a CORS-safe `data:` URI.
-- **`www` Magic:** Optional flag (`m`) to try `www.domain.com` if `domain.com` fails.
 - **Hybrid Storage:** The Docker version uses Redis or an in-memory cache. The Cloudflare version uses Workers KV.
 - **Advanced Rate Limiting:** Configure multiple, concurrent limits per API key or for anonymous users.
+- **Custom DNS (Docker only):** Optionally bypass the system's DNS resolver by providing your own.
+- **Secure:** Includes SSRF protection, request timeouts, and standard security headers.
 
 ---
 
@@ -20,7 +21,7 @@ This repository contains two variants of a high-performance service that fetches
 
 **Base URL:** `https://your-app-url.com/`
 
-All parameters and their values (e.g., `true`, `TRUE`) are **case-insensitive**. Parameters can be provided via URL query string or request headers, with query string values taking precedence.
+All parameters and their values are **case-insensitive**. Parameters can be provided via URL query string or request headers, with query string values taking precedence.
 
 - **`domain` (Required):** The domain to fetch. e.g., `google.com`.
 - **`s` / `size` (Optional):** The desired icon size. Default: `64`.
@@ -47,7 +48,7 @@ Request: `GET /?domain=github.com&s=128&b64=TRUE`
   - **Body:**
     ```json
     {
-      "href": "https://github.githubassets.com/assets/apple-touch-icon-144x144.png",
+      "href": "[https://github.githubassets.com/assets/apple-touch-icon-144x144.png](https://github.githubassets.com/assets/apple-touch-icon-144x144.png)",
       "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhE..."
     }
     ```
@@ -72,14 +73,11 @@ For security, you must add your API keys as secrets after the initial deployment
 1.  In the Cloudflare dashboard, navigate to your newly deployed Worker.
 2.  Go to `Settings` -> `Variables`.
 3.  Under `Environment Variables`, click `Add variable`, enter the name (e.g., `AUTHN0`), enter the secret value, and click `Encrypt`.
-4.  Repeat for the corresponding limit (e.g., `LIMIT0`) and any other secrets.
-
-*(For fully automated CI/CD, see the instructions for deploying with GitHub Actions in the `.github/workflows/cloudflare.yml` file.)*
 
 ### Deploy to Heroku (Docker Variant)
 
 **Option 1: Deploy with Managed Redis (Production Ready)**
-[![Deploy to Heroku with Redis](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/kaerez/favicon-fetcher&filename=app.json)
+[![Deploy to Heroku with Redis](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/kaerez/favicon-fetcher)
 
 **Option 2: Deploy Manually or In-Memory**
 [![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/kaerez/favicon-fetcher&filename=app-no-redis.json)
@@ -98,3 +96,34 @@ For security, you must add your API keys as secrets after the initial deployment
 4.  **Run with Docker Compose:** `docker-compose up --build`
 
 The service will be available at `http://localhost:8080`.
+
+---
+
+## Environment Variables (Docker Variant)
+
+Variable *keys* (e.g., `PORT`, `AUTHN0`) are **case-sensitive**.
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `PORT` | The port the server listens on. | `8080` |
+| `REDIS_URL` | Connection string for Redis. If not set, the app falls back to in-memory mode. | `""` (none) |
+| `DNS1`-`DNS4` | Optional: Custom DNS servers (IPv4 or IPv6) to use instead of the system default. | `""` (none) |
+| `LIMIT_SEPARATOR` | The character for separating multiple rate limit rules. Defaults to `,`. Set to `;` for GCP. | `,` |
+| `CACHE_ENABLED` | Enables/disables caching (`true`/`false`). | `true` |
+| `CACHE_TTL_SECONDS` | Cache expiration time in seconds. | `86400` (24h) |
+| `IN_MEMORY_CACHE_MAX_SIZE`| Max cache size (in bytes) for in-memory mode. | `52428800` (50MB) |
+| `REQ_TIMEOUT_MS` | Milliseconds to wait for target sites. | `5000` (5s) |
+| `HTML_PAYLOAD_LIMIT` | Max HTML size to download (in bytes). | `250000` (250KB) |
+| `ICON_PAYLOAD_LIMIT` | Max icon file size to download (in bytes). | `2097152` (2MB) |
+| `CUSTOM_USER_AGENT` | Override the default User-Agent string. | `Mozilla/5.0 (Macintosh...)` |
+| `AUTHN[0-1000]` | API key. e.g., `AUTHN0=key_abc`. | `""` |
+| `LIMIT[0-1000]` | Rate limit for the corresponding API key. e.g., `LIMIT0=rps:10,rpm:500`. | `""` |
+| `LIMITA` | **Global** rate limit for all anonymous users. | `rps:1,rpm:60` |
+| `LIMITI` | **Per-IP** rate limit for anonymous users. Applied *in addition to* `LIMITA`.| `""` |
+
+### Limit Format
+
+Limits are defined as a comma/semicolon-separated list of `unit:value` pairs or just `value` (defaults to `rps`).
+- **Units:** `rps` (requests per second), `rpm` (minute), `rph` (hour), `rpd` (day).
+- **Value of `0`:** Blocks all requests for that key.
+- **Examples:** `rps:10,rpm:500`, `10` (same as `rps:10`).
