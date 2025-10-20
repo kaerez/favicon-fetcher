@@ -3,7 +3,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { URL } = require('url');
 const { Address6 } = require('ip-address');
-const dns = require('dns').promises;
+const { promises: dns } = require('dns');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { RedisStore } = require('rate-limit-redis');
@@ -42,6 +42,23 @@ const {
 
 const DEFAULT_USER_AGENT = custom_user_agent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const G_CACHE_ENABLED = String(cache_enabled).toLowerCase() === 'true';
+
+// --- DNS Configuration ---
+const customDnsServers = [];
+for (let i = 1; i <= 4; i++) {
+  if (process.env[`DNS${i}`]) {
+    customDnsServers.push(process.env[`DNS${i}`]);
+  }
+}
+let dnsResolver = null;
+if (customDnsServers.length > 0) {
+  dnsResolver = new dns.Resolver();
+  dnsResolver.setServers(customDnsServers);
+  console.log(`Using custom DNS servers: ${customDnsServers.join(', ')}`);
+} else {
+  console.log('Using system default DNS resolver.');
+}
+
 
 // --- Storage Setup (Hybrid: Redis or In-Memory) ---
 let redisClient;
@@ -186,11 +203,22 @@ const isIpPrivate = (ip) => {
 httpClient.interceptors.request.use(async (config) => {
   const { hostname } = new URL(config.url);
   try {
+    let address;
     if (new Address6(hostname).isValid()) {
-      if (isIpPrivate(hostname)) throw new axios.Cancel(`Request to private IP blocked: ${hostname}`);
+      address = hostname; // It's already an IP
     } else {
-      const { address } = await dns.lookup(hostname);
-      if (isIpPrivate(address)) throw new axios.Cancel(`Request to private IP blocked. ${hostname} resolves to ${address}`);
+      // Perform DNS lookup using the appropriate resolver
+      if (dnsResolver) {
+        const addresses = await dnsResolver.resolve(hostname);
+        if (addresses.length === 0) throw new Error('No addresses found');
+        address = addresses[0]; // Use the first resolved address
+      } else {
+        const lookupResult = await dns.lookup(hostname);
+        address = lookupResult.address;
+      }
+    }
+    if (isIpPrivate(address)) {
+      throw new axios.Cancel(`Request to private IP blocked. ${hostname} resolves to ${address}`);
     }
   } catch (e) {
     if (e instanceof axios.Cancel) throw e;
@@ -238,8 +266,6 @@ function findIconsInHtml(html, baseUrl) {
   return icons;
 }
 
-// *** THE FINAL FIX IS HERE ***
-// This function is now fully exhaustive and redirect-aware.
 async function getFaviconUrls(domain, desiredSize, magic) {
   const domainsToConsider = new Set([domain]);
   if (magic) {
@@ -249,7 +275,6 @@ async function getFaviconUrls(domain, desiredSize, magic) {
 
   let allIcons = [];
 
-  // 1. Exhaustively check all domain variants for HTML-declared icons
   for (const d of domainsToConsider) {
     for (const protocol of ['https', 'http']) {
       try {
@@ -257,26 +282,21 @@ async function getFaviconUrls(domain, desiredSize, magic) {
         const iconsFromHtml = findIconsInHtml(data, finalUrl);
         allIcons = allIcons.concat(iconsFromHtml);
         
-        // Also add the redirected domain to our list to check for favicon.ico
         const finalDomain = new URL(finalUrl);
         domainsToConsider.add(finalDomain.hostname);
         
-        // We got HTML, no need to try the other protocol for this domain
         break; 
       } catch (e) {
-        // Log for debugging but continue the search
         console.log(`Could not fetch HTML from ${protocol}://${d}: ${e.message}`);
       }
     }
   }
 
-  // 2. Now add all possible /favicon.ico fallbacks for all collected domains
   for (const d of domainsToConsider) {
     allIcons.push({ href: `https://${d}/favicon.ico`, size: 0 });
     allIcons.push({ href: `http://${d}/favicon.ico`, size: 0 });
   }
   
-  // 3. Sort the master list and return unique URLs
   const sortedIcons = allIcons.sort((a, b) => {
     const aDiff = Math.abs(a.size - desiredSize);
     const bDiff = Math.abs(b.size - desiredSize);
