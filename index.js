@@ -81,7 +81,6 @@ app.set('trust proxy', 1);
 const httpClient = axios.create({
   timeout: parseInt(req_timeout_ms, 10),
   headers: { 'User-Agent': DEFAULT_USER_AGENT },
-  // Important: Keep maxRedirects to follow sites like google.com
   maxRedirects: 5,
 });
 
@@ -211,14 +210,11 @@ function normalizeDomain(domain) {
   return url;
 }
 
-// *** THE FIX IS HERE (Bug #2) ***
-// fetchHtml now returns the final URL after redirects.
 async function fetchHtml(url) {
   const response = await httpClient.get(url, { 
     maxContentLength: parseInt(html_payload_limit, 10), 
     responseType: 'text' 
   });
-  // The final URL after all redirects
   const finalUrl = response.request.res.responseUrl || url;
   return { data: response.data, finalUrl };
 }
@@ -242,37 +238,45 @@ function findIconsInHtml(html, baseUrl) {
   return icons;
 }
 
+// *** THE FINAL FIX IS HERE ***
+// This function is now fully exhaustive and redirect-aware.
 async function getFaviconUrls(domain, desiredSize, magic) {
-  const domainsToTry = [domain];
+  const domainsToConsider = new Set([domain]);
   if (magic) {
-    if (domain.startsWith('www.')) domainsToTry.push(domain.substring(4));
-    else domainsToTry.push(`www.${domain}`);
+    if (domain.startsWith('www.')) domainsToConsider.add(domain.substring(4));
+    else domainsToConsider.add(`www.${domain}`);
   }
+
   let allIcons = [];
 
-  for (const d of domainsToTry) {
+  // 1. Exhaustively check all domain variants for HTML-declared icons
+  for (const d of domainsToConsider) {
     for (const protocol of ['https', 'http']) {
       try {
         const { data, finalUrl } = await fetchHtml(`${protocol}://${d}`);
-        const iconsFromHtml = findIconsInHtml(data, finalUrl); // Use the final URL as the base
+        const iconsFromHtml = findIconsInHtml(data, finalUrl);
         allIcons = allIcons.concat(iconsFromHtml);
-        // If we found icons from HTML, we can often trust this is the canonical source
-        if(iconsFromHtml.length > 0) {
-           // Add favicon.ico for the final redirected domain as well
-           const finalDomain = new URL(finalUrl);
-           allIcons.push({ href: `${finalDomain.protocol}//${finalDomain.hostname}/favicon.ico`, size: 0 });
-        }
+        
+        // Also add the redirected domain to our list to check for favicon.ico
+        const finalDomain = new URL(finalUrl);
+        domainsToConsider.add(finalDomain.hostname);
+        
+        // We got HTML, no need to try the other protocol for this domain
         break; 
-      } catch (e) { /* Continue */ }
+      } catch (e) {
+        // Log for debugging but continue the search
+        console.log(`Could not fetch HTML from ${protocol}://${d}: ${e.message}`);
+      }
     }
   }
 
-  // Always add all possible /favicon.ico fallbacks as a last resort
-  for (const d of domainsToTry) {
+  // 2. Now add all possible /favicon.ico fallbacks for all collected domains
+  for (const d of domainsToConsider) {
     allIcons.push({ href: `https://${d}/favicon.ico`, size: 0 });
     allIcons.push({ href: `http://${d}/favicon.ico`, size: 0 });
   }
   
+  // 3. Sort the master list and return unique URLs
   const sortedIcons = allIcons.sort((a, b) => {
     const aDiff = Math.abs(a.size - desiredSize);
     const bDiff = Math.abs(b.size - desiredSize);
@@ -280,6 +284,7 @@ async function getFaviconUrls(domain, desiredSize, magic) {
     if (a.size < desiredSize && b.size >= desiredSize) return 1;
     return aDiff - bDiff;
   });
+
   const uniqueUrls = [...new Set(sortedIcons.map(icon => icon.href))];
   if (uniqueUrls.length === 0) throw new Error('No potential icon URLs found for this domain');
   return uniqueUrls;
