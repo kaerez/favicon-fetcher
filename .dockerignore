@@ -1,22 +1,30 @@
-# Git files
+# Git version control files
 
 .git
 .github
-.gitignore
 
-# Docker specific files
-
-.dockerignore
-
-# Project config and documentation
+# Local environment configuration
 
 .env
-.env.example
+.env.*
+
+# Documentation and project config not needed in the image
+
 README.md
+.dockerignore
+.gitignore
+docker-compose.yml
 cloudbuild.yaml
 app.json
 app-no-redis.json
 
-# Node modules (will be installed inside the container)
+# Node.js dependencies (will be installed inside the container)
 
 node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Exclude the Cloudflare Worker variant from the Docker build
+
+cloudflare/
