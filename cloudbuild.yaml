@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LicenseRef-KSEC-FaviconFetcher
+# Copyright (C) 2025 KSEC - Erez Kalman
 steps:
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build', '-t', 'gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA', '.']
