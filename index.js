@@ -2,8 +2,9 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { URL } = require('url');
+const https = require('https');
 const { Address6 } = require('ip-address');
-const { promises: dns } = require('dns');
+const { promises: dns, Resolver } = require('dns');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { RedisStore } = require('rate-limit-redis');
@@ -38,12 +39,22 @@ const {
   icon_payload_limit = 2 * 1024 * 1024,
   custom_user_agent,
   limit_separator = ',',
-  use_doh = 'false', // New variable for DNS over HTTPS
+  debug = 'false', // New DEBUG variable
+  doh1, doh2, // New DOH variables
 } = env;
 
 const DEFAULT_USER_AGENT = custom_user_agent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const G_CACHE_ENABLED = String(cache_enabled).toLowerCase() === 'true';
-const G_USE_DOH = String(use_doh).toLowerCase() === 'true';
+const G_DEBUG = String(debug).toLowerCase() === 'true';
+const G_DOH_ENDPOINTS = [doh1, doh2].filter(Boolean);
+const G_DOH_ENABLED = G_DOH_ENDPOINTS.length > 0;
+
+// --- Debug Logger ---
+const logDebug = (...args) => {
+  if (G_DEBUG) {
+    console.log(...args);
+  }
+};
 
 // --- DNS Configuration ---
 const customDnsServers = [];
@@ -52,16 +63,17 @@ for (let i = 1; i <= 4; i++) {
   if (dnsVar) customDnsServers.push(dnsVar);
 }
 let dnsResolver = null;
-if (customDnsServers.length > 0 && !G_USE_DOH) { // Only setup if not using DoH
-  dnsResolver = new dns.Resolver();
+if (customDnsServers.length > 0) {
+  dnsResolver = new Resolver();
   dnsResolver.setServers(customDnsServers);
-  console.log(`Using custom DNS servers: ${customDnsServers.join(', ')}`);
-} else if (G_USE_DOH) {
-    console.log('Using DNS over HTTPS (DoH).');
+  console.log(`Custom DNS resolver configured with: ${customDnsServers.join(', ')}`);
 } else {
-  console.log('Using system default DNS resolver.');
+  console.log('Using system default DNS resolver for initial DoH lookup (if applicable).');
 }
 
+if (G_DOH_ENABLED) {
+  console.log(`DNS over HTTPS (DoH) is enabled. Using endpoints: ${G_DOH_ENDPOINTS.join(', ')}`);
+}
 
 // --- Storage Setup (Hybrid: Redis or In-Memory) ---
 let redisClient;
@@ -158,7 +170,7 @@ const createRateLimiter = (limits, keyGenerator) => {
     });
   });
   return (req, res, next) => {
-    const runLimiters = (index) => {
+    const runLimiter = (index) => {
       if (index >= limiters.length) return next();
       limiters[index](req, res, (err) => {
         if (err || res.headersSent) return;
@@ -203,8 +215,6 @@ const isIpPrivate = (ip) => {
   }
 };
 
-// *** THE FINAL FIX IS HERE ***
-// This interceptor now includes DNS-over-HTTPS (DoH) logic.
 httpClient.interceptors.request.use(async (config) => {
   const url = new URL(config.url);
   const { hostname } = url;
@@ -212,33 +222,47 @@ httpClient.interceptors.request.use(async (config) => {
   try {
     let address;
     if (new Address6(hostname).isValid()) {
-      address = hostname; // It's already an IP
+      address = hostname;
     } else {
-      if (G_USE_DOH) {
-        // DNS over HTTPS path
-        const dohResponse = await axios.get(`https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`, {
-          headers: { 'accept': 'application/dns-json' }
+      if (G_DOH_ENABLED) {
+        logDebug(`Resolving ${hostname} via DoH...`);
+        // Use a custom agent ONLY for the DoH lookup if custom DNS servers are specified
+        const dohAxiosConfig = {};
+        if (dnsResolver) {
+          dohAxiosConfig.httpsAgent = new https.Agent({
+            lookup: (hostname, options, callback) => {
+              dnsResolver.resolve4(hostname, (err, addresses) => {
+                if (err) return callback(err);
+                callback(null, addresses[0], 4);
+              });
+            }
+          });
+        }
+        const dohResponse = await axios.get(`${G_DOH_ENDPOINTS[0]}?name=${hostname}&type=A`, {
+          headers: { 'accept': 'application/dns-json' },
+          ...dohAxiosConfig
         });
         const answers = dohResponse.data.Answer;
         if (!answers || answers.length === 0) throw new Error('No A records found via DoH');
         address = answers[0].data;
+
       } else if (dnsResolver) {
-        // Custom DNS path
+        logDebug(`Resolving ${hostname} via custom DNS...`);
         const addresses = await dnsResolver.resolve(hostname);
         if (addresses.length === 0) throw new Error('No addresses found');
         address = addresses[0];
       } else {
-        // System DNS path
+        logDebug(`Resolving ${hostname} via system DNS...`);
         const lookupResult = await dns.lookup(hostname);
         address = lookupResult.address;
       }
     }
 
+    logDebug(`${hostname} resolved to ${address}`);
     if (isIpPrivate(address)) {
       throw new axios.Cancel(`Request to private IP blocked. ${hostname} resolves to ${address}`);
     }
 
-    // Force Axios to use our resolved IP address
     url.hostname = address;
     config.url = url.toString();
     config.headers['Host'] = hostname;
@@ -246,7 +270,7 @@ httpClient.interceptors.request.use(async (config) => {
     return config;
   } catch (e) {
     if (e instanceof axios.Cancel) throw e;
-    throw new Error(`DNS lookup failed for ${hostname}`);
+    throw new Error(`DNS lookup failed for ${hostname}: ${e.message}`);
   }
 });
 
@@ -299,7 +323,7 @@ async function getFaviconUrls(domain, desiredSize, magic) {
 
   let allIcons = [];
 
-  for (const d of domainsToConsider) {
+  for (const d of [...domainsToConsider]) { // Create a copy as we might modify the set
     for (const protocol of ['https', 'http']) {
       try {
         const { data, finalUrl } = await fetchHtml(`${protocol}://${d}`);
@@ -311,7 +335,7 @@ async function getFaviconUrls(domain, desiredSize, magic) {
         
         break; 
       } catch (e) {
-        console.log(`Could not fetch HTML from ${protocol}://${d}: ${e.message}`);
+        logDebug(`Could not fetch HTML from ${protocol}://${d}: ${e.message}`);
       }
     }
   }
@@ -390,7 +414,7 @@ app.get('/', async (req, res, next) => {
         if (useBase64) return res.json({ href, base64: `data:${contentType};base64,${imageBuffer.toString('base64')}` });
         return res.setHeader('Content-Type', contentType).send(imageBuffer);
       } catch (error) {
-        console.log(`Individual fetch failed: ${error.message}`);
+        logDebug(`Individual fetch failed: ${error.message}`);
       }
     }
     throw new Error('No valid icons could be fetched for this domain');
