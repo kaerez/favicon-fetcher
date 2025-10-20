@@ -7,8 +7,6 @@
 # Docker specific files
 
 .dockerignore
-Dockerfile
-docker-compose.yml
 
 # Project config and documentation
 
