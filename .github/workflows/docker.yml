@@ -19,6 +19,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Set up Docker Buildx to enable advanced features like artifact creation
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -32,22 +36,22 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
 
+      # Build the image, push it to GHCR, and save it as a local .tar file
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          # Push only on pushes to the main branch, not on pull requests
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # The env block below is a commented-out example of how to pass
-          # variables if you were to RUN the container for testing in this workflow.
-          # These are RUNTIME variables and are not baked into the image.
-          # env:
-          #   PORT: 8080
-          #   REDIS_URL: "redis://some-test-redis:6379"
-          #   CACHE_ENABLED: true
-          #   LIMIT_SEPARATOR: ','
-          #   LIMITA: "rps:100"
-          #   AUTHN0: "some_secret_key"
-          #   LIMIT0: "rpm:1000"
+          # Save the image as a tarball to be uploaded as an artifact
+          outputs: type=docker,dest=/tmp/favicon-fetcher-image.tar
+
+      # Upload the .tar file as a build artifact for inspection and local use
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: favicon-fetcher-image
+          path: /tmp/favicon-fetcher-image.tar
 
