@@ -109,7 +109,6 @@ Variable *keys* (e.g., `PORT`, `AUTHN0`) are **case-sensitive**.
 | `PORT` | The port the server listens on. | `8080` |
 | `REDIS_URL` | Connection string for Redis. If not set, the app falls back to in-memory mode. | `""` (none) |
 | `DOH1`, `DOH2` | Optional DoH endpoints. `DOH1`: `https://cloudflare-dns.com/dns-query`, `DOH2`: `https://dns.google/dns-query`. | `""` (none) |
-| `DNS1`-`DNS4` | Optional: Custom DNS servers. Used for DoH lookups if `DOH` is set, otherwise used directly. | `""` (none) |
 | `DEBUG` | Set to `true` to enable detailed console logging for troubleshooting. | `false` |
 | `LIMIT_SEPARATOR` | Character for separating multiple rate limit rules. Defaults to `,`. Set to `;` for GCP. | `,` |
 | `CACHE_ENABLED` | Enables/disables caching (`true`/`false`). | `true` |
