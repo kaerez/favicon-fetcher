@@ -14,10 +14,21 @@ steps:
   - '--region=us-central1'
   - '--allow-unauthenticated'
   - '--port=8080'
-  # GCP's gcloud command requires using semicolons as separators within env vars.
-  # The LIMIT_SEPARATOR tells the app to parse them correctly.
-  # Add other variables like AUTHN0=secret;LIMIT0=... as needed.
-  - '--set-env-vars=NODE_ENV=production,PORT=8080,CACHE_ENABLED=true,CACHE_TTL_SECONDS=86400,REQ_TIMEOUT_MS=5000,HTML_PAYLOAD_LIMIT=250000,ICON_PAYLOAD_LIMIT=2097152,IN_MEMORY_CACHE_MAX_SIZE=52428800,LIMIT_SEPARATOR=semicolon,LIMITA=rps:1;rpm:60,LIMITI=rpm:30,CUSTOM_USER_AGENT=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+  # --- Environment Variables ---
+  # The --set-env-vars flag is a comma-separated list of KEY=VALUE pairs.
+  # For GCP, the rate limit values MUST use a semicolon (;) as the separator instead of a comma.
+  #
+  # Uncomment and modify one of the examples below for your deployment.
+  # You must provide a line starting with '--set-env-vars=' for the deployment to have your custom config.
+
+  # Example 1: Using Google Memorystore (no password) and a sample API key
+  # - '--set-env-vars=NODE_ENV=production,LIMIT_SEPARATOR=semicolon,REDIS_URL=redis://10.0.0.3:6379,AUTHN0=your-secure-api-key,LIMIT0=rps:10;rpm:500'
+
+  # Example 2: Using an external Redis provider (e.g., Aiven, Redis Labs) with a username and password
+  # Note: If your password contains special characters (@, :, /, #, ?), they MUST be URL-encoded.
+  # For example, a password like 'p@ss#word' must be written as 'p%40ss%23word' in the URL.
+  # - '--set-env-vars=NODE_ENV=production,LIMIT_SEPARATOR=semicolon,REDIS_URL=rediss://default:p%40ss%23word@my-redis-provider.com:12345,AUTHN0=your-secure-api-key,LIMIT0=rps:10;rpm:500'
+
 images:
 - 'gcr.io/$PROJECT_ID/favicon-fetcher:$COMMIT_SHA'
 
