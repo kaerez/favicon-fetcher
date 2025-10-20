@@ -20,16 +20,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU for multi-architecture builds
+      # --- Resilient QEMU Setup ---
+      - name: Set up QEMU (primary)
+        id: qemu_default
         uses: docker/setup-qemu-action@v3
+        continue-on-error: true
 
-      # Step 1: Attempt to set up Buildx from the default source (Docker Hub)
+      - name: Set up QEMU (manual fallback from ECR Mirror)
+        if: steps.qemu_default.outcome == 'failure'
+        run: |
+          echo "Default QEMU setup failed, falling back to manual run with ECR mirror."
+          docker run --rm --privileged public.ecr.aws/multiarch/qemu-user-static:latest --reset -p yes
+
+      # --- Resilient Buildx Setup ---
       - name: Set up Docker Buildx (primary)
         id: buildx_default
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
-      # Step 2: If the primary setup failed, use the ECR mirror as a fallback
       - name: Set up Docker Buildx (from ECR Mirror as fallback)
         if: steps.buildx_default.outcome == 'failure'
         run: |
@@ -58,7 +66,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          # If the fallback ran, we need to specify the builder name
           builder: ${{ steps.buildx_default.outcome == 'failure' && 'multi-arch-builder' || '' }}
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -78,10 +85,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
+      # --- Resilient QEMU Setup ---
+      - name: Set up QEMU (primary)
+        id: qemu_default
         uses: docker/setup-qemu-action@v3
+        continue-on-error: true
 
-      # Use the same automated fallback logic for the artifact job
+      - name: Set up QEMU (manual fallback from ECR Mirror)
+        if: steps.qemu_default.outcome == 'failure'
+        run: |
+          echo "Default QEMU setup failed, falling back to manual run with ECR mirror."
+          docker run --rm --privileged public.ecr.aws/multiarch/qemu-user-static:latest --reset -p yes
+
+      # --- Resilient Buildx Setup ---
       - name: Set up Docker Buildx (primary)
         id: buildx_default
         uses: docker/setup-buildx-action@v3
