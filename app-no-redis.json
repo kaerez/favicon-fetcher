@@ -10,66 +10,66 @@
   "image": "heroku/nodejs",
   "env": {
     "NODE_ENV": {
-      "description": "Sets the application environment to production.",
+      "description": "Sets the application environment to production. Should not be changed.",
       "value": "production"
     },
     "REDIS_URL": {
-      "description": "(Optional) The connection URL for an external Redis instance. Leave blank to use in-memory mode.",
+      "description": "(Optional) The full connection URL for an external Redis instance. IMPORTANT: If your password contains special characters (@, :, /, #, ?), they MUST be URL-encoded (e.g., a password like 'p@ss#word' becomes 'p%40ss%23word'). Leave blank to use in-memory mode.",
       "value": "",
       "required": false
     },
     "LIMIT_SEPARATOR": {
-      "description": "The character used to separate multiple rate limit rules. Defaults to comma.",
+      "description": "The character used to separate multiple rate limit rules. Heroku supports the default comma.",
       "value": ",",
       "required": false
     },
     "CACHE_ENABLED": {
-      "description": "Enables or disables caching (true/false).",
+      "description": "Enables or disables caching ('true'/'false'). Recommended to keep enabled.",
       "value": "true",
       "required": false
     },
     "CACHE_TTL_SECONDS": {
-      "description": "Cache expiration time in seconds.",
+      "description": "Cache expiration time in seconds. Default is 86400 (24 hours).",
       "value": "86400",
       "required": false
     },
     "REQ_TIMEOUT_MS": {
-      "description": "Milliseconds to wait for target sites.",
+      "description": "Milliseconds to wait for target sites before timing out. Default is 5000 (5 seconds).",
       "value": "5000",
       "required": false
     },
     "HTML_PAYLOAD_LIMIT": {
-      "description": "Max HTML size to download in bytes.",
+      "description": "Max HTML size to download in bytes. Default is 250000 (250KB).",
       "value": "250000",
       "required": false
     },
     "ICON_PAYLOAD_LIMIT": {
-      "description": "Max icon file size to download in bytes.",
+      "description": "Max icon file size to download in bytes. Default is 2097152 (2MB).",
       "value": "2097152",
       "required": false
     },
     "CUSTOM_USER_AGENT": {
-      "description": "Override the default User-Agent string.",
+      "description": "Optional: Override the default User-Agent string used for making requests.",
       "value": "",
       "required": false
     },
     "AUTHN0": {
-      "description": "Example API key. Create AUTHN1, AUTHN2, etc. for more keys.",
+      "description": "Example API key. You can create more by adding AUTHN1, AUTHN2, etc. in the Heroku dashboard after deployment.",
       "value": "",
       "required": false
     },
     "LIMIT0": {
-      "description": "Example rate limit for the corresponding API key (AUTHN0).",
+      "description": "Example rate limit for AUTHN0. Format is a comma-separated list of 'unit:value' (e.g., 'rps:10,rpm:500').",
       "value": "rps:10,rpm:500",
       "required": false
     },
     "LIMITA": {
-      "description": "Global rate limit for all anonymous users.",
+      "description": "Global rate limit for all anonymous users. Format is 'unit:value' list.",
       "value": "rps:1,rpm:60",
       "required": false
     },
     "LIMITI": {
-      "description": "Per-IP rate limit for anonymous users. Applied in addition to LIMITA.",
+      "description": "Per-IP rate limit for anonymous users, applied in addition to LIMITA. Format is 'unit:value' list.",
       "value": "rpm:30",
       "required": false
     }
