@@ -1,6 +1,118 @@
 // --- Cloudflare Worker for Favicon Fetcher ---
+// ⚠️ SECURITY NOTE: This Worker has LIMITED SSRF protection due to platform constraints.
+// It blocks direct IP addresses but CANNOT prevent domains that resolve to private IPs.
+// For production use requiring strong SSRF protection, use the Docker variant instead.
 
 import { HTMLRewriter } from 'html-rewriter-wasm';
+
+// --- SSRF Protection Functions ---
+
+function isIpv4Private(ip) {
+  const octets = ip.split('.').map(Number);
+  if (octets.length !== 4 || octets.some(o => isNaN(o) || o < 0 || o > 255)) {
+    return false;
+  }
+  
+  const [a, b, c, d] = octets;
+  
+  // Check all private and reserved IPv4 ranges
+  return (
+    a === 0 ||                              // 0.0.0.0/8 - Current network
+    a === 10 ||                             // 10.0.0.0/8 - Private
+    a === 127 ||                            // 127.0.0.0/8 - Loopback
+    (a === 169 && b === 254) ||             // 169.254.0.0/16 - Link-local
+    (a === 172 && b >= 16 && b <= 31) ||    // 172.16.0.0/12 - Private
+    (a === 192 && b === 0 && c === 0) ||    // 192.0.0.0/24 - IETF Protocol Assignments
+    (a === 192 && b === 0 && c === 2) ||    // 192.0.2.0/24 - TEST-NET-1
+    (a === 192 && b === 168) ||             // 192.168.0.0/16 - Private
+    (a === 198 && b === 18) ||              // 198.18.0.0/15 - Benchmark testing
+    (a === 198 && b === 19) ||              // 198.18.0.0/15 - Benchmark testing
+    (a === 198 && b === 51 && c === 100) || // 198.51.100.0/24 - TEST-NET-2
+    (a === 203 && b === 0 && c === 113) ||  // 203.0.113.0/24 - TEST-NET-3
+    a >= 224 ||                             // 224.0.0.0/4 - Multicast, 240.0.0.0/4 - Reserved
+    (a === 100 && b >= 64 && b <= 127) ||   // 100.64.0.0/10 - CGNAT
+    (a === 192 && b === 88 && c === 99)     // 192.88.99.0/24 - 6to4 Relay Anycast
+  );
+}
+
+function isIpv6Private(ip) {
+  const lower = ip.toLowerCase();
+  
+  // Unspecified and loopback
+  if (lower === '::1' || lower === '::') return true;
+  
+  // Link-local
+  if (lower.startsWith('fe80:')) return true;
+  
+  // Unique Local Addresses (ULA)
+  if (lower.startsWith('fc00:') || lower.startsWith('fd00:')) return true;
+  
+  // Multicast
+  if (lower.startsWith('ff0')) return true;
+  
+  // IPv4-mapped IPv6 addresses
+  if (lower.startsWith('::ffff:')) {
+    const ipv4Part = ip.substring(7);
+    return isIpv4Private(ipv4Part);
+  }
+  
+  // Documentation ranges
+  if (lower.startsWith('2001:db8:')) return true;
+  
+  // TEREDO
+  if (lower.startsWith('2001:0:')) return true;
+  
+  // 6to4
+  if (lower.startsWith('2002:')) return true;
+  
+  // Discard prefix
+  if (lower.startsWith('100::')) return true;
+  
+  return false;
+}
+
+function validateDomain(domain) {
+  // Block direct IPv4 addresses
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(domain)) {
+    if (isIpv4Private(domain)) {
+      throw new Error('Access to private IP addresses is blocked');
+    }
+    // Even if it's a public IP, fetching directly by IP is suspicious
+    console.warn(`Direct IP access attempted: ${domain}`);
+  }
+  
+  // Block IPv6 addresses
+  if (domain.includes(':') && !domain.includes('://')) {
+    if (isIpv6Private(domain)) {
+      throw new Error('Access to private IPv6 addresses is blocked');
+    }
+    console.warn(`Direct IPv6 access attempted: ${domain}`);
+  }
+  
+  // Block localhost variants
+  const blockedHosts = [
+    'localhost',
+    '127.0.0.1',
+    '::1',
+    '0.0.0.0',
+    'ip6-localhost',
+    'ip6-loopback'
+  ];
+  if (blockedHosts.includes(domain.toLowerCase())) {
+    throw new Error('Access to localhost is blocked');
+  }
+  
+  // Block suspicious patterns
+  if (domain.includes('@')) {
+    throw new Error('Invalid domain format: @ character not allowed');
+  }
+  if (domain.includes('..')) {
+    throw new Error('Invalid domain format: .. pattern not allowed');
+  }
+  if (domain.includes('\\')) {
+    throw new Error('Invalid domain format: backslash not allowed');
+  }
+}
 
 // Helper to get a value from Request (Headers or Query) case-insensitively
 function getParam(request, key) {
@@ -105,6 +217,10 @@ function normalizeDomain(domain) {
     if (url.startsWith('http')) url = url.split('//')[1];
     url = url.split('/')[0].split('?')[0];
     if (!url || url.includes('..') || url.includes('@')) throw new Error('Invalid domain format');
+    
+    // ⚠️ SSRF Protection: Validate domain
+    validateDomain(url);
+    
     return url;
 }
 
@@ -120,7 +236,11 @@ async function getFaviconUrls(domain, desiredSize, magic, env) {
         for (const protocol of ['https', 'http']) {
             try {
                 const baseUrl = `${protocol}://${d}`;
-                const response = await fetch(baseUrl, { headers: { 'User-Agent': env.CUSTOM_USER_AGENT || 'Favicon-Fetcher-Worker/1.0' } });
+                const response = await fetch(baseUrl, { 
+                  headers: { 'User-Agent': env.CUSTOM_USER_AGENT || 'Favicon-Fetcher-Worker/1.0' },
+                  // Add timeout to prevent hanging on slow/malicious servers
+                  signal: AbortSignal.timeout(5000)
+                });
                 if (!response.ok) continue;
 
                 const icons = [];
@@ -146,7 +266,9 @@ async function getFaviconUrls(domain, desiredSize, magic, env) {
                 iconsFromHtml = icons;
                 allIcons = allIcons.concat(iconsFromHtml);
                 break;
-            } catch (e) { /* continue */ }
+            } catch (e) { 
+              console.log(`Could not fetch HTML from ${protocol}://${d}: ${e.message}`);
+            }
         }
         allIcons.push({ href: `https://${d}/favicon.ico`, size: 0 });
         allIcons.push({ href: `http://${d}/favicon.ico`, size: 0 });
@@ -167,7 +289,10 @@ async function getFaviconUrls(domain, desiredSize, magic, env) {
 }
 
 async function fetchAndProcessIcon(iconUrl, env) {
-    const response = await fetch(iconUrl, { headers: { 'User-Agent': env.CUSTOM_USER_AGENT || 'Favicon-Fetcher-Worker/1.0' } });
+    const response = await fetch(iconUrl, { 
+      headers: { 'User-Agent': env.CUSTOM_USER_AGENT || 'Favicon-Fetcher-Worker/1.0' },
+      signal: AbortSignal.timeout(5000)
+    });
     if (!response.ok) throw new Error(`Failed to fetch icon with status ${response.status}`);
     
     const contentType = response.headers.get('content-type') || 'application/octet-stream';
@@ -191,7 +316,9 @@ export default {
             const b64 = getParam(request, 'b64') !== null;
 
             const desiredSize = parseInt(size, 10);
-            if (isNaN(desiredSize)) return new Response(JSON.stringify({ error: 'Invalid size' }), { status: 400 });
+            if (isNaN(desiredSize) || desiredSize < 1 || desiredSize > 2048) {
+              return new Response(JSON.stringify({ error: 'Invalid size parameter (must be between 1 and 2048)' }), { status: 400 });
+            }
 
             const cleanDomain = normalizeDomain(domain);
             const cacheKey = `favicon:${cleanDomain}:${desiredSize}:${magic}`;
@@ -233,8 +360,11 @@ export default {
 
         } catch (e) {
             console.error(`Final error: ${e.message}`);
-            return new Response(JSON.stringify({ error: e.message || 'An unexpected error occurred' }), { status: 500 });
+            let statusCode = 500;
+            if (e.message.includes('Invalid') || e.message.includes('required')) statusCode = 400;
+            else if (e.message.includes('blocked')) statusCode = 403;
+            else if (e.message.includes('No icons') || e.message.includes('No valid icons')) statusCode = 404;
+            return new Response(JSON.stringify({ error: e.message || 'An unexpected error occurred' }), { status: statusCode });
         }
     }
 };
-
