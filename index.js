@@ -39,8 +39,8 @@ const {
   icon_payload_limit = 2 * 1024 * 1024,
   custom_user_agent,
   limit_separator = ',',
-  debug = 'false', // New DEBUG variable
-  doh1, doh2, // New DOH variables
+  debug = 'false',
+  doh1, doh2,
 } = env;
 
 const DEFAULT_USER_AGENT = custom_user_agent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
@@ -49,11 +49,8 @@ const G_DEBUG = String(debug).toLowerCase() === 'true';
 const G_DOH_ENDPOINTS = [doh1, doh2].filter(Boolean);
 const G_DOH_ENABLED = G_DOH_ENDPOINTS.length > 0;
 
-// --- Debug Logger ---
 const logDebug = (...args) => {
-  if (G_DEBUG) {
-    console.log(...args);
-  }
+  if (G_DEBUG) console.log(...args);
 };
 
 // --- DNS Configuration ---
@@ -67,12 +64,15 @@ if (customDnsServers.length > 0) {
   dnsResolver = new Resolver();
   dnsResolver.setServers(customDnsServers);
   console.log(`Custom DNS resolver configured with: ${customDnsServers.join(', ')}`);
-} else {
-  console.log('Using system default DNS resolver for initial DoH lookup (if applicable).');
 }
 
 if (G_DOH_ENABLED) {
   console.log(`DNS over HTTPS (DoH) is enabled. Using endpoints: ${G_DOH_ENDPOINTS.join(', ')}`);
+} else if (dnsResolver) {
+    // This message was missing, leading to confusion.
+    console.log(`DoH is disabled. Using custom DNS servers directly.`);
+} else {
+  console.log('Using system default DNS resolver.');
 }
 
 // --- Storage Setup (Hybrid: Redis or In-Memory) ---
@@ -103,7 +103,7 @@ if (REDIS_URL) {
   };
 }
 
-// --- Security & HTTP Client ---
+// --- Security & HTTP Clients ---
 
 const app = express();
 app.use(helmet());
@@ -115,6 +115,12 @@ const httpClient = axios.create({
   headers: { 'User-Agent': DEFAULT_USER_AGENT },
   maxRedirects: 5,
 });
+
+const dohClient = axios.create({
+  timeout: parseInt(req_timeout_ms, 10),
+  headers: { 'User-Agent': DEFAULT_USER_AGENT },
+});
+
 
 // --- Auth & Rate Limiting ---
 
@@ -170,7 +176,7 @@ const createRateLimiter = (limits, keyGenerator) => {
     });
   });
   return (req, res, next) => {
-    const runLimiter = (index) => {
+    const runLimiters = (index) => {
       if (index >= limiters.length) return next();
       limiters[index](req, res, (err) => {
         if (err || res.headersSent) return;
@@ -226,24 +232,41 @@ httpClient.interceptors.request.use(async (config) => {
     } else {
       if (G_DOH_ENABLED) {
         logDebug(`Resolving ${hostname} via DoH...`);
-        // Use a custom agent ONLY for the DoH lookup if custom DNS servers are specified
         const dohAxiosConfig = {};
         if (dnsResolver) {
+          logDebug(`Using custom DNS for DoH bootstrap of ${new URL(G_DOH_ENDPOINTS[0]).hostname}...`);
           dohAxiosConfig.httpsAgent = new https.Agent({
-            lookup: (hostname, options, callback) => {
-              dnsResolver.resolve4(hostname, (err, addresses) => {
-                if (err) return callback(err);
-                callback(null, addresses[0], 4);
-              });
+            lookup: (lookupHostname, options, callback) => {
+              dnsResolver.resolve4(lookupHostname)
+                .then(addresses => callback(null, addresses[0], 4))
+                .catch(err => callback(err));
             }
           });
         }
-        const dohResponse = await axios.get(`${G_DOH_ENDPOINTS[0]}?name=${hostname}&type=A`, {
-          headers: { 'accept': 'application/dns-json' },
-          ...dohAxiosConfig
-        });
-        const answers = dohResponse.data.Answer;
-        if (!answers || answers.length === 0) throw new Error('No A records found via DoH');
+        
+        // --- THE FIX IS HERE ---
+        // First try for an A record (IPv4)
+        let answers;
+        try {
+            const dohResponseA = await dohClient.get(`${G_DOH_ENDPOINTS[0]}?name=${hostname}&type=A`, {
+              headers: { 'accept': 'application/dns-json' },
+              ...dohAxiosConfig
+            });
+            answers = dohResponseA.data.Answer;
+        } catch (e) {
+            logDebug(`DoH A record lookup for ${hostname} failed, trying AAAA.`);
+        }
+
+        // If no A records, try for AAAA (IPv6)
+        if (!answers || answers.length === 0) {
+            const dohResponseAAAA = await dohClient.get(`${G_DOH_ENDPOINTS[0]}?name=${hostname}&type=AAAA`, {
+              headers: { 'accept': 'application/dns-json' },
+              ...dohAxiosConfig
+            });
+            answers = dohResponseAAAA.data.Answer;
+        }
+
+        if (!answers || answers.length === 0) throw new Error('No A or AAAA records found via DoH');
         address = answers[0].data;
 
       } else if (dnsResolver) {
@@ -323,7 +346,7 @@ async function getFaviconUrls(domain, desiredSize, magic) {
 
   let allIcons = [];
 
-  for (const d of [...domainsToConsider]) { // Create a copy as we might modify the set
+  for (const d of [...domainsToConsider]) {
     for (const protocol of ['https', 'http']) {
       try {
         const { data, finalUrl } = await fetchHtml(`${protocol}://${d}`);
