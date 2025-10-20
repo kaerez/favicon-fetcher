@@ -1,6 +1,6 @@
 # Favicon Fetcher License
 
-SPDX-License-Identifier: LicenseRef-KSEC-FaviconFetcher-1.0
+SPDX-License-Identifier: LicenseRef-KSEC-FaviconFetcher
 
 Copyright (C) 2025 KSEC - Erez Kalman
 All rights reserved.
