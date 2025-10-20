@@ -8,8 +8,6 @@
 // It blocks direct IP addresses but CANNOT prevent domains that resolve to private IPs.
 // For production use requiring strong SSRF protection, use the Docker variant instead.
 
-import { HTMLRewriter } from 'html-rewriter-wasm';
-
 // --- SSRF Protection Functions ---
 
 function isIpv4Private(ip) {
