@@ -244,12 +244,24 @@ async function resolveViaDoh(hostname) {
             const dohResponseA = await dohClient.get(`${dohRequestUrl}&type=A`, {
                 headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
             });
+            
+            // --- DIAGNOSTIC LOGGING ---
+            console.log(`--- RAW DOH RESPONSE FOR ${hostname} (A) FROM ${endpoint} ---`);
+            console.log(JSON.stringify(dohResponseA.data, null, 2));
+            // --- END DIAGNOSTIC LOGGING ---
+            
             const answersA = (dohResponseA.data.Answer || []).filter(a => a.type === 1).map(a => a.data);
             if (answersA.length > 0) return answersA[0];
 
             const dohResponseAAAA = await dohClient.get(`${dohRequestUrl}&type=AAAA`, {
                 headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
             });
+
+            // --- DIAGNOSTIC LOGGING ---
+            console.log(`--- RAW DOH RESPONSE FOR ${hostname} (AAAA) FROM ${endpoint} ---`);
+            console.log(JSON.stringify(dohResponseAAAA.data, null, 2));
+            // --- END DIAGNOSTIC LOGGING ---
+
             const answersAAAA = (dohResponseAAAA.data.Answer || []).filter(a => a.type === 28).map(a => a.data);
             if (answersAAAA.length > 0) return answersAAAA[0];
 
@@ -349,7 +361,7 @@ async function getFaviconUrls(domain, desiredSize, magic) {
 
   let allIcons = [];
 
-  for (const d of [...domainsToConsider]) {
+  for (const d of [...domainsTo.values()]) {
     for (const protocol of ['https', 'http']) {
       try {
         const { data, finalUrl } = await fetchHtml(`${protocol}://${d}`);
@@ -366,7 +378,7 @@ async function getFaviconUrls(domain, desiredSize, magic) {
     }
   }
 
-  for (const d of domainsToConsider) {
+  for (const d of domainsToConsider.values()) {
     allIcons.push({ href: `https://${d}/favicon.ico`, size: 0 });
     allIcons.push({ href: `http://${d}/favicon.ico`, size: 0 });
   }
@@ -464,3 +476,4 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(port, () => console.log(`Favicon Fetcher listening on port ${port}`));
+
