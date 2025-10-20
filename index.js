@@ -361,7 +361,7 @@ async function getFaviconUrls(domain, desiredSize, magic) {
 
   let allIcons = [];
 
-  for (const d of [...domainsTo.values()]) {
+  for (const d of [...domainsToConsider.values()]) {
     for (const protocol of ['https', 'http']) {
       try {
         const { data, finalUrl } = await fetchHtml(`${protocol}://${d}`);
