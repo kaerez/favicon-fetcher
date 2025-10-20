@@ -69,7 +69,6 @@ if (customDnsServers.length > 0) {
 if (G_DOH_ENABLED) {
   console.log(`DNS over HTTPS (DoH) is enabled. Using endpoints: ${G_DOH_ENDPOINTS.join(', ')}`);
 } else if (dnsResolver) {
-    // This message was missing, leading to confusion.
     console.log(`DoH is disabled. Using custom DNS servers directly.`);
 } else {
   console.log('Using system default DNS resolver.');
@@ -232,40 +231,38 @@ httpClient.interceptors.request.use(async (config) => {
     } else {
       if (G_DOH_ENABLED) {
         logDebug(`Resolving ${hostname} via DoH...`);
-        const dohAxiosConfig = {};
+        // --- THE FINAL FIX IS HERE ---
+        // 1. Resolve the DoH server's IP first, cleanly.
+        const dohUrl = new URL(G_DOH_ENDPOINTS[0]);
+        const dohHostname = dohUrl.hostname;
+        let dohIp;
         if (dnsResolver) {
-          logDebug(`Using custom DNS for DoH bootstrap of ${new URL(G_DOH_ENDPOINTS[0]).hostname}...`);
-          dohAxiosConfig.httpsAgent = new https.Agent({
-            lookup: (lookupHostname, options, callback) => {
-              dnsResolver.resolve4(lookupHostname)
-                .then(addresses => callback(null, addresses[0], 4))
-                .catch(err => callback(err));
-            }
+          logDebug(`Using custom DNS for DoH bootstrap of ${dohHostname}`);
+          const addresses = await dnsResolver.resolve(dohHostname);
+          if (addresses.length === 0) throw new Error(`Could not resolve DoH server ${dohHostname}`);
+          dohIp = addresses[0];
+        } else {
+          logDebug(`Using system DNS for DoH bootstrap of ${dohHostname}`);
+          const lookupResult = await dns.lookup(dohHostname);
+          dohIp = lookupResult.address;
+        }
+        logDebug(`DoH server ${dohHostname} resolved to ${dohIp}`);
+
+        // 2. Make the DoH request using the resolved IP.
+        const dohRequestUrl = `${dohUrl.protocol}//${dohIp}${dohUrl.pathname}?name=${hostname}&type=A`;
+        const dohResponseA = await dohClient.get(dohRequestUrl, {
+          headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
+        });
+        
+        let answers = dohResponseA.data.Answer;
+        if (!answers || answers.length === 0) {
+          const dohRequestUrlAAAA = `${dohUrl.protocol}//${dohIp}${dohUrl.pathname}?name=${hostname}&type=AAAA`;
+          const dohResponseAAAA = await dohClient.get(dohRequestUrlAAAA, {
+             headers: { 'accept': 'application/dns-json', 'Host': dohHostname }
           });
+          answers = dohResponseAAAA.data.Answer;
         }
         
-        // --- THE FIX IS HERE ---
-        // First try for an A record (IPv4)
-        let answers;
-        try {
-            const dohResponseA = await dohClient.get(`${G_DOH_ENDPOINTS[0]}?name=${hostname}&type=A`, {
-              headers: { 'accept': 'application/dns-json' },
-              ...dohAxiosConfig
-            });
-            answers = dohResponseA.data.Answer;
-        } catch (e) {
-            logDebug(`DoH A record lookup for ${hostname} failed, trying AAAA.`);
-        }
-
-        // If no A records, try for AAAA (IPv6)
-        if (!answers || answers.length === 0) {
-            const dohResponseAAAA = await dohClient.get(`${G_DOH_ENDPOINTS[0]}?name=${hostname}&type=AAAA`, {
-              headers: { 'accept': 'application/dns-json' },
-              ...dohAxiosConfig
-            });
-            answers = dohResponseAAAA.data.Answer;
-        }
-
         if (!answers || answers.length === 0) throw new Error('No A or AAAA records found via DoH');
         address = answers[0].data;
 
