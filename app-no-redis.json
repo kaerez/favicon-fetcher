@@ -1,6 +1,6 @@
 {
-  "name": "Favicon Fetcher (In-Memory)",
-  "description": "A service to fetch favicons. (Testing/Demo only, not for production)",
+  "name": "Favicon Fetcher (Manual/In-Memory)",
+  "description": "A service to fetch favicons. Deploys in in-memory mode by default, but can connect to an external Redis if you provide a REDIS_URL.",
   "repository": "https://github.com/kaerez/favicon-fetcher",
   "keywords": [
     "node",
@@ -10,59 +10,67 @@
   "image": "heroku/nodejs",
   "env": {
     "NODE_ENV": {
+      "description": "Sets the application environment to production.",
       "value": "production"
     },
+    "REDIS_URL": {
+      "description": "(Optional) The connection URL for an external Redis instance. Leave blank to use in-memory mode.",
+      "value": "",
+      "required": false
+    },
     "LIMIT_SEPARATOR": {
-      "description": "Heroku supports commas, so this can be left unset to use the default.",
+      "description": "The character used to separate multiple rate limit rules. Defaults to comma.",
       "value": ",",
       "required": false
     },
     "CACHE_ENABLED": {
-      "description": "Enable or disable caching.",
-      "value": "true"
+      "description": "Enables or disables caching (true/false).",
+      "value": "true",
+      "required": false
     },
     "CACHE_TTL_SECONDS": {
       "description": "Cache expiration time in seconds.",
-      "value": "86400"
-    },
-    "IN_MEMORY_CACHE_MAX_SIZE": {
-      "description": "Max cache size (in bytes) for in-memory mode.",
-      "value": "52428800"
-    },
-    "REQ_TIMEOUT_MS": {
-      "description": "Timeout for fetching external resources in milliseconds.",
-      "value": "5000"
-    },
-    "HTML_PAYLOAD_LIMIT": {
-      "description": "Max HTML size to download (in bytes).",
-      "value": "250000"
-    },
-    "ICON_PAYLOAD_LIMIT": {
-      "description": "Max icon file size to download (in bytes).",
-      "value": "2097152"
-    },
-    "CUSTOM_USER_AGENT": {
-      "description": "Override the default User-Agent.",
-      "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+      "value": "86400",
       "required": false
     },
-    "LIMITA": {
-      "description": "Global anonymous limit (e.g., rps:1,rpm:60).",
-      "value": "rps:1,rpm:60"
+    "REQ_TIMEOUT_MS": {
+      "description": "Milliseconds to wait for target sites.",
+      "value": "5000",
+      "required": false
     },
-    "LIMITI": {
-      "description": "Per-IP anonymous limit (e.g., rpm:30).",
-      "value": "rpm:30",
+    "HTML_PAYLOAD_LIMIT": {
+      "description": "Max HTML size to download in bytes.",
+      "value": "250000",
+      "required": false
+    },
+    "ICON_PAYLOAD_LIMIT": {
+      "description": "Max icon file size to download in bytes.",
+      "value": "2097152",
+      "required": false
+    },
+    "CUSTOM_USER_AGENT": {
+      "description": "Override the default User-Agent string.",
+      "value": "",
       "required": false
     },
     "AUTHN0": {
-      "description": "Example API key for user 0.",
+      "description": "Example API key. Create AUTHN1, AUTHN2, etc. for more keys.",
       "value": "",
       "required": false
     },
     "LIMIT0": {
-      "description": "Example rate limit for user 0.",
-      "value": "",
+      "description": "Example rate limit for the corresponding API key (AUTHN0).",
+      "value": "rps:10,rpm:500",
+      "required": false
+    },
+    "LIMITA": {
+      "description": "Global rate limit for all anonymous users.",
+      "value": "rps:1,rpm:60",
+      "required": false
+    },
+    "LIMITI": {
+      "description": "Per-IP rate limit for anonymous users. Applied in addition to LIMITA.",
+      "value": "rpm:30",
       "required": false
     }
   }
