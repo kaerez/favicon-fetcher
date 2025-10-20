@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-KSEC-FaviconFetcher-1.0
+// SPDX-License-Identifier: LicenseRef-KSEC-FaviconFetcher
 // Copyright (C) 2025 KSEC - Erez Kalman. All rights reserved.
 // Personal non-commercial use only. Commercial license required for all other uses.
 // See LICENSE.md for full terms: https://github.com/kaerez/favicon-fetcher/blob/main/LICENSE.md
