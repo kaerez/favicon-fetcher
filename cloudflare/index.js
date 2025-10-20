@@ -56,14 +56,14 @@ async function checkRateLimits(request, env) {
       if (r.max === 0) return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
 
       const fullKey = `${key}:${Math.floor(Date.now() / r.windowMs)}`;
-      const current = await env.RATE_LIMITS.get(fullKey, { type: 'text' });
+      const current = await env.FAVICON_FETCHER_RATE_LIMITS.get(fullKey, { type: 'text' });
       const count = parseInt(current || '0', 10) + 1;
 
       if (count > r.max) {
         return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
       }
 
-      await env.RATE_LIMITS.put(fullKey, count.toString(), { expirationTtl: r.windowMs / 1000 });
+      await env.FAVICON_FETCHER_RATE_LIMITS.put(fullKey, count.toString(), { expirationTtl: r.windowMs / 1000 });
     }
   }
   return null; // All limits passed
@@ -197,7 +197,7 @@ export default {
             const cacheKey = `favicon:${cleanDomain}:${desiredSize}:${magic}`;
 
             if (String(env.CACHE_ENABLED).toLowerCase() === 'true') {
-                const cached = await env.FAVICON_CACHE.get(cacheKey, { type: 'json' });
+                const cached = await env.FAVICON_FETCHER_CACHE.get(cacheKey, { type: 'json' });
                 if (cached) {
                     const imageBuffer = new Uint8Array(Object.values(cached.buffer)).buffer;
                     if (b64) {
@@ -216,7 +216,7 @@ export default {
 
                     if (String(env.CACHE_ENABLED).toLowerCase() === 'true') {
                         const cacheTtl = parseInt(env.CACHE_TTL_SECONDS || '86400', 10);
-                        ctx.waitUntil(env.FAVICON_CACHE.put(cacheKey, { buffer: Array.from(new Uint8Array(buffer)), contentType, href }, { expirationTtl: cacheTtl }));
+                        ctx.waitUntil(env.FAVICON_FETCHER_CACHE.put(cacheKey, { buffer: Array.from(new Uint8Array(buffer)), contentType, href }, { expirationTtl: cacheTtl }));
                     }
 
                     if (b64) {
@@ -237,3 +237,4 @@ export default {
         }
     }
 };
+
