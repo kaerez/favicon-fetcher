@@ -5,20 +5,40 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Connect the app to the redis service defined below
-      REDIS_URL: "redis://redis:6379"
+      # --- Server Configuration ---
       PORT: 8080
-    # Load local .env file for auth keys and other secrets
-    env_file:
-      - .env
+      # Connects to the 'redis' service defined below
+      REDIS_URL: "redis://redis:6379"
+
+      # --- Rate Limit Separator ---
+      # Comma is the default, no need to set for docker-compose
+      # LIMIT_SEPARATOR: ','
+
+      # --- Cache Configuration ---
+      CACHE_ENABLED: 'true'
+      CACHE_TTL_SECONDS: 86400
+      IN_MEMORY_CACHE_MAX_SIZE: 52428800
+
+      # --- Fetcher Configuration ---
+      REQ_TIMEOUT_MS: 5000
+      HTML_PAYLOAD_LIMIT: 250000
+      ICON_PAYLOAD_LIMIT: 2097152
+      # CUSTOM_USER_AGENT: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+
+      # --- Authentication & Limits ---
+      # Fill these in for local testing
+      # AUTHN0: 'secret_key_for_client_0'
+      # LIMIT0: 'rps:10,rpm:500'
+      
+      # --- Anonymous Limits ---
+      LIMITA: 'rps:1,rpm:60'
+      LIMITI: 'rpm:30'
     depends_on:
       - redis
 
   redis:
     image: "redis:7-alpine"
-    # No need to expose Redis port to host machine, app container can access it directly
     volumes:
-      # Persist Redis data across restarts
       - redis_data:/data
 
 volumes:
