@@ -57,14 +57,15 @@ let cacheStore;
 
 if (REDIS_URL) {
   console.log('Found Redis URL. Connecting to Redis for caching and rate limiting.');
-  redisClient = new IORedis(REDIS_URL, {
+  const redisOptions = {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
-    // Heroku Redis requires TLS
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
+  };
+  // Add TLS for Heroku Redis
+  if (REDIS_URL.includes('rediss://')) {
+    redisOptions.tls = { rejectUnauthorized: false };
+  }
+  redisClient = new IORedis(REDIS_URL, redisOptions);
 
   cacheStore = {
     get: (key) => redisClient.get(key),
@@ -286,15 +287,19 @@ function findIconsInHtml(html, baseUrl) {
         size = parseInt(sizeMatch[1], 10);
       }
     }
-    icons.push({
-      href: new URL(href, baseUrl).href,
-      size: size || 0,
-    });
+    try {
+      icons.push({
+        href: new URL(href, baseUrl).href,
+        size: size || 0,
+      });
+    } catch(e) {
+      // Ignore invalid URLs
+    }
   });
   return icons;
 }
 
-async function getFaviconUrl(domain, desiredSize, magic) {
+async function getFaviconUrls(domain, desiredSize, magic) {
   const domainsToTry = [domain];
   if (magic) {
     if (domain.startsWith('www.')) {
@@ -305,9 +310,9 @@ async function getFaviconUrl(domain, desiredSize, magic) {
   }
 
   let allIcons = [];
-  let htmlParseSuccess = false;
 
   for (const d of domainsToTry) {
+    let htmlParseSuccess = false;
     for (const protocol of ['https', 'http']) {
       try {
         const baseUrl = `${protocol}://${d}`;
@@ -318,27 +323,33 @@ async function getFaviconUrl(domain, desiredSize, magic) {
       } catch (e) { /* Continue */ }
     }
     
-    if (!htmlParseSuccess) {
-      allIcons.push({ href: `https://${d}/favicon.ico`, size: 0 });
-      allIcons.push({ href: `http://${d}/favicon.ico`, size: 0 });
-    }
+    // Always add default /favicon.ico as a last resort for each domain
+    allIcons.push({ href: `https://${d}/favicon.ico`, size: 0 });
+    allIcons.push({ href: `http://${d}/favicon.ico`, size: 0 });
     
     if (htmlParseSuccess) break;
   }
   
-  if (allIcons.length === 0) {
-    throw new Error('No icons found');
+  // Sort and prioritize icons
+  const sortedIcons = allIcons
+    .sort((a, b) => {
+      const aDiff = Math.abs(a.size - desiredSize);
+      const bDiff = Math.abs(b.size - desiredSize);
+
+      if (a.size >= desiredSize && b.size < desiredSize) return -1;
+      if (a.size < desiredSize && b.size >= desiredSize) return 1;
+      
+      return aDiff - bDiff;
+    });
+
+  // Deduplicate URLs, keeping the order
+  const uniqueUrls = [...new Set(sortedIcons.map(icon => icon.href))];
+  
+  if (uniqueUrls.length === 0) {
+    throw new Error('No icons found for this domain');
   }
 
-  let bestFit = allIcons
-    .filter(icon => icon.size >= desiredSize)
-    .sort((a, b) => a.size - b.size)[0];
-  
-  if (!bestFit) {
-    bestFit = allIcons.sort((a, b) => b.size - a.size)[0];
-  }
-  
-  return (bestFit || allIcons[0]).href;
+  return uniqueUrls;
 }
 
 async function fetchAndProcessIcon(iconUrl) {
@@ -350,7 +361,7 @@ async function fetchAndProcessIcon(iconUrl) {
 
     const contentType = response.headers['content-type'] || 'application/octet-stream';
     if (!contentType.startsWith('image/')) {
-      throw new Error('Fetched file is not an image');
+      throw new Error(`Fetched file is not an image: ${contentType}`);
     }
 
     return {
@@ -360,6 +371,7 @@ async function fetchAndProcessIcon(iconUrl) {
     };
   } catch (error) {
     if (axios.isCancel(error)) throw error;
+    // Re-throw to be caught by the iterator in the main handler
     throw new Error(`Failed to fetch icon: ${iconUrl}`);
   }
 }
@@ -407,25 +419,38 @@ app.get('/', async (req, res, next) => {
       }
     }
     
-    const iconUrl = await getFaviconUrl(cleanDomain, desiredSize, useMagic);
-    const { buffer: imageBuffer, contentType, href } = await fetchAndProcessIcon(iconUrl);
+    const iconUrls = await getFaviconUrls(cleanDomain, desiredSize, useMagic);
+    
+    for (const iconUrl of iconUrls) {
+      try {
+        const { buffer: imageBuffer, contentType, href } = await fetchAndProcessIcon(iconUrl);
 
-    if (G_CACHE_ENABLED) {
-      const cacheValue = JSON.stringify({
-        buffer: imageBuffer.toString('base64'),
-        contentType,
-        href,
-      });
-      await cacheStore.set(cacheKey, cacheValue);
+        // Success! Cache and send the response.
+        if (G_CACHE_ENABLED) {
+          const cacheValue = JSON.stringify({
+            buffer: imageBuffer.toString('base64'),
+            contentType,
+            href,
+          });
+          await cacheStore.set(cacheKey, cacheValue);
+        }
+
+        if (useBase64) {
+          return res.json({
+            href,
+            base64: `data:${contentType};base64,${imageBuffer.toString('base64')}`
+          });
+        }
+        return res.setHeader('Content-Type', contentType).send(imageBuffer);
+
+      } catch (error) {
+        // Log the individual failure and continue to the next URL
+        console.log(`Individual fetch failed: ${error.message}`);
+      }
     }
 
-    if (useBase64) {
-      return res.json({
-        href,
-        base64: `data:${contentType};base64,${imageBuffer.toString('base64')}`
-      });
-    }
-    return res.setHeader('Content-Type', contentType).send(imageBuffer);
+    // If the loop completes without finding a valid icon
+    throw new Error('No valid icons could be fetched for this domain');
 
   } catch (error) {
     next(error);
@@ -439,11 +464,11 @@ app.get('/health', (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error(err.message);
+  console.error(`Final error for request: ${err.message}`);
   let statusCode = 500;
   if (err.message.includes('Invalid') || err.message.includes('required')) {
     statusCode = 400;
-  } else if (err.message.includes('No icons found') || err.message.includes('404')) {
+  } else if (err.message.includes('No icons found') || err.message.includes('No valid icons could be fetched')) {
     statusCode = 404;
   } else if (err.message.includes('timeout') || err.code === 'ECONNABORTED' || err.message.includes('DNS')) {
     statusCode = 504;
