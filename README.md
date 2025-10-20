@@ -1,4 +1,5 @@
 # Favicon Fetcher Service
+[![License](https://img.shields.io/badge/License-Personal_NonCommercial-red.svg)](./LICENSE.md)
 
 This repository contains two variants of a high-performance service that fetches, caches, and serves website favicons:
 1.  **Docker/Node.js Variant:** A traditional server application designed to run in a Docker container on platforms like Heroku, GCP Cloud Run, or any standard server.
@@ -156,3 +157,20 @@ Limits are defined as a comma/semicolon-separated list of `unit:value` pairs or 
 - **Units:** `rps` (requests per second), `rpm` (minute), `rph` (hour), `rpd` (day).
 - **Value of `0`:** Blocks all requests for that key.
 - **Examples:** `rps:10,rpm:500`, `10` (same as `rps:10`).
+
+## 📜 License
+
+**Dual Licensed:** Personal Non-Commercial OR Commercial
+
+⚠️ **Important:** This software is available for **personal, non-commercial use only** under the free license.
+
+**Prohibited without commercial license:**
+- Business/company use of any kind
+- Websites or services accessed by others
+- Any gated/monetized/ad-supported use
+- Educational/academic/research use
+- SaaS or service provision
+
+**Commercial licenses available:** Contact https://www.kalman.co.il
+
+Full terms: [LICENSE.md](./LICENSE.md)
