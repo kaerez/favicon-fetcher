@@ -6,7 +6,7 @@ const { Address6 } = require('ip-address');
 const dns = require('dns').promises;
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const RedisStore = require('rate-limit-redis');
+const { RedisStore } = require('rate-limit-redis');
 const IORedis = require('ioredis');
 const { LRUCache } = require('lru-cache');
 
@@ -240,21 +240,24 @@ async function getFaviconUrls(domain, desiredSize, magic) {
     else domainsToTry.push(`www.${domain}`);
   }
   let allIcons = [];
+
   for (const d of domainsToTry) {
-    let iconsFromHtml = [];
     for (const protocol of ['https', 'http']) {
       try {
         const baseUrl = `${protocol}://${d}`;
         const html = await fetchHtml(baseUrl);
-        iconsFromHtml = findIconsInHtml(html, baseUrl);
+        const iconsFromHtml = findIconsInHtml(html, baseUrl);
         allIcons = allIcons.concat(iconsFromHtml);
-        break;
+        break; 
       } catch (e) { /* Continue */ }
     }
+  }
+
+  for (const d of domainsToTry) {
     allIcons.push({ href: `https://${d}/favicon.ico`, size: 0 });
     allIcons.push({ href: `http://${d}/favicon.ico`, size: 0 });
-    if (iconsFromHtml.length > 0) break;
   }
+  
   const sortedIcons = allIcons.sort((a, b) => {
     const aDiff = Math.abs(a.size - desiredSize);
     const bDiff = Math.abs(b.size - desiredSize);
@@ -287,7 +290,6 @@ async function fetchAndProcessIcon(iconUrl) {
 
 app.get('/', async (req, res, next) => {
   try {
-    // Combine headers and query params, with query taking precedence.
     const params = {};
     for (const key in req.headers) { params[key.toLowerCase()] = req.headers[key]; }
     for (const key in req.query) { params[key.toLowerCase()] = req.query[key]; }
