@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: LicenseRef-KSEC-FaviconFetcher-1.0
+// Copyright (C) 2025 KSEC - Erez Kalman. All rights reserved.
+// Personal non-commercial use only. Commercial license required for all other uses.
+// See LICENSE.md for full terms: https://github.com/kaerez/favicon-fetcher/blob/main/LICENSE.md
+
 // --- Cloudflare Worker for Favicon Fetcher ---
 // ⚠️ SECURITY NOTE: This Worker has LIMITED SSRF protection due to platform constraints.
 // It blocks direct IP addresses but CANNOT prevent domains that resolve to private IPs.
