@@ -10,8 +10,8 @@ compatibility_date = "2023-10-30"
 # the deployment process will automatically prompt you to create these namespaces
 # because the 'id' fields are not specified.
 kv_namespaces = [
-  { binding = "FAVICON_CACHE" },
-  { binding = "RATE_LIMITS" }
+  { binding = "FAVICON_FETCHER_CACHE" },
+  { binding = "FAVICON_FETCHER_RATE_LIMITS" }
 ]
 
 # --- Environment Variables ---
