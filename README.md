@@ -23,6 +23,7 @@ It can be run as a "stateless" service (for local testing, using in-memory cache
 **Base URL:** `https://your-app-url.com/`
 
 All query parameters, their values (e.g., `true`, `TRUE`), and the domain are **case-insensitive**.
+The parameters can also be provided in the request header.
 
 - **`domain` (Required):** The domain to fetch. e.g., `google.com`.
 - **`s` / `size` (Optional):** The desired icon size (if available). Default: `64`. e.g., `s=16`.
