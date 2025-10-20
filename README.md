@@ -12,7 +12,8 @@ This repository contains two variants of a high-performance service that fetches
 - **Base64 Format:** Optional flag (`b64`) to return a JSON object with a CORS-safe `data:` URI.
 - **Hybrid Storage:** The Docker version uses Redis or an in-memory cache. The Cloudflare version uses Workers KV.
 - **Advanced Rate Limiting:** Configure multiple, concurrent limits per API key or for anonymous users.
-- **Custom DNS (Docker only):** Optionally bypass the system's DNS resolver by providing your own.
+- **Resilient DNS (Docker only):** Optionally bypass a faulty system DNS resolver by using DNS over HTTPS (DoH) or specifying custom DNS servers.
+- **Debug Logging (Docker only):** Enable detailed logging for troubleshooting.
 - **Secure:** Includes SSRF protection, request timeouts, and standard security headers.
 
 ---
@@ -77,7 +78,7 @@ For security, you must add your API keys as secrets after the initial deployment
 ### Deploy to Heroku (Docker Variant)
 
 **Option 1: Deploy with Managed Redis (Production Ready)**
-[![Deploy to Heroku with Redis](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/kaerez/favicon-fetcher)
+[![Deploy to Heroku with Redis](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/kaerez/favicon-fetcher&filename=app.json)
 
 **Option 2: Deploy Manually or In-Memory**
 [![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/kaerez/favicon-fetcher&filename=app-no-redis.json)
@@ -107,8 +108,10 @@ Variable *keys* (e.g., `PORT`, `AUTHN0`) are **case-sensitive**.
 | :--- | :--- | :--- |
 | `PORT` | The port the server listens on. | `8080` |
 | `REDIS_URL` | Connection string for Redis. If not set, the app falls back to in-memory mode. | `""` (none) |
-| `DNS1`-`DNS4` | Optional: Custom DNS servers (IPv4 or IPv6) to use instead of the system default. | `""` (none) |
-| `LIMIT_SEPARATOR` | The character for separating multiple rate limit rules. Defaults to `,`. Set to `;` for GCP. | `,` |
+| `DOH1`, `DOH2` | Optional DoH endpoints. `DOH1`: `https://cloudflare-dns.com/dns-query`, `DOH2`: `https://dns.google/dns-query`. | `""` (none) |
+| `DNS1`-`DNS4` | Optional: Custom DNS servers. Used for DoH lookups if `DOH` is set, otherwise used directly. | `""` (none) |
+| `DEBUG` | Set to `true` to enable detailed console logging for troubleshooting. | `false` |
+| `LIMIT_SEPARATOR` | Character for separating multiple rate limit rules. Defaults to `,`. Set to `;` for GCP. | `,` |
 | `CACHE_ENABLED` | Enables/disables caching (`true`/`false`). | `true` |
 | `CACHE_TTL_SECONDS` | Cache expiration time in seconds. | `86400` (24h) |
 | `IN_MEMORY_CACHE_MAX_SIZE`| Max cache size (in bytes) for in-memory mode. | `52428800` (50MB) |
