@@ -4,13 +4,14 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files first to leverage Docker layer caching
 COPY package.json package-lock.json ./
 
 # Install only production dependencies to keep the build lean
 RUN npm ci --omit=dev
 
 # Copy the rest of the application code
+# This will respect the .dockerignore file at the root of the context
 COPY . .
 
 # --- Stage 2: Production ---
